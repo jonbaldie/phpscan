@@ -1,10 +1,16 @@
-.PHONY: setup build test cves lint package
+.PHONY: setup build generate compile test cves lint package
 
 setup:
 	bash scripts/setup-bend.sh
 
 build:
 	bash scripts/build.sh
+
+generate:
+	bash scripts/build.sh generate
+
+compile:
+	bash scripts/build.sh compile
 
 test:
 	bash tests/check.sh ./dist/phpscan tests/cases/*.php tests/versions/*.php
