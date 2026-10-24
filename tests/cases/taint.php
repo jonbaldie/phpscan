@@ -77,6 +77,19 @@ $st = $pdo->prepare('SELECT * FROM t WHERE a = ?');
 $st->execute([$_GET['a']]);
 $pdo->query('SELECT * FROM t WHERE a = ' . $_GET['a']); // expect: PHP-SQLI
 
+// --- decoder after a sanitizer inside a called function restores sink taint
+function open_decoded_path($path) {
+    $path = wp_kses_decode_entities($path);
+    fopen($path, 'rb');
+}
+open_decoded_path(basename($_GET['file'])); // expect: PHP-PATH
+
+function open_path($path) {
+    fopen($path, 'rb');
+}
+open_path(basename($_GET['file']));
+open_decoded_path(intval($_GET['file']));
+
 // --- suppression
 echo $_GET['trusted']; // phpscan-ignore
 // phpscan-ignore

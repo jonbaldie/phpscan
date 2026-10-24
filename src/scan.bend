@@ -13,20 +13,25 @@ import ./tree.bend as T
 type Finding is Data:
   Finding{line: U32, cls: U32, sink: String}
 
-# Analysis state: variable taints, findings so far, OR of returned taints.
+# Analysis state: variable taints, findings, returned taints, and sink classes
+# reached after a decoder restored a function parameter's taint.
 type St is Data:
-  St{env: Map<&2, U32>, fs: List<&2, Finding>, ret: U32}
+  St{env: Map<&2, U32>, fs: List<&2, Finding>, ret: U32, revived: U32}
 
 # A result: the value's taint, argument taints (for argument lists), state.
 type Res is Data:
   Res{t: U32, ts: List<&2, U32>, st: St}
 
 # Function summary: taint returned with clean arguments, then per argument
-# the classes that flow to the return value and the classes it reaches sinks
-# with inside the body.
+# the classes that flow to the return value or reach sinks, normally or after
+# a decoder restores taint cleared by the caller.
 type Sum is Data:
   NoSum{}
-  Sum{src: U32, props: List<&2, U32>, sinks: List<&2, U32>}
+  Sum{src: U32, props: List<&2, U32>, sinks: List<&2, U32>, revived: List<&2, U32>}
+
+type Seed is Data:
+  SrcSeed{}
+  MarkerSeed{}
 
 # A builtin model. result = (OR of args in ra, minus clr) | src, plus the
 # receiver when rcv is 1. Reports cls sc when the OR of args in sa has it.
@@ -59,6 +64,14 @@ def ALL() -> U32:
 
 def SRC() -> U32:
   1023
+
+# Internal summary-only marker for request taint, not a vulnerability class.
+def SUMMARY_MARKER() -> U32:
+  1024
+
+# Internal flag marking taint restored by a decoder during summary analysis.
+def RESTORED() -> U32:
+  2048
 
 def tor(a: U32, b: U32) -> U32:
   U32.or(a, b)
@@ -131,6 +144,15 @@ def tail(ts: List<&2, U32>) -> List<&2, U32>:
 def fs.add(+fs: List<&2, Finding>, +line: U32, +cls: U32, sink: String) -> List<&2, Finding>:
   L.sel(List<&2, Finding>, nz(cls), u => Con{Finding{line, cls, sink}, fs}, u => fs)
 
+def is.restored(taint: U32) -> Bool:
+  nz(U32.and(taint, RESTORED()))
+
+# Encode sink classes reached after decoding above bit 9 for summary extraction.
+def sink.bits(+taint: U32, cls: U32) -> U32:
+  +hit = U32.and(taint, cls)
+  +factor = U32.add(1, b2t(is.restored(taint), 1024))
+  U32.mul(hit, factor)
+
 # One finding per class bit set in bits.
 def fs.bits(n: Nat, +bits: U32, +bit: U32, +fs: List<&2, Finding>, +line: U32, +sink: String) -> List<&2, Finding>:
   match n:
@@ -141,18 +163,25 @@ def fs.bits(n: Nat, +bits: U32, +bit: U32, +fs: List<&2, Finding>, +line: U32, +
 
 def st.find(st: St, +line: U32, +bits: U32, +sink: String) -> St:
   match st:
-    case St{env, fs, ret}:
-      St{env, fs.bits(10n, bits, 1, fs, line, sink), ret}
+    case St{env, fs, ret, revived}:
+      +normal = U32.and(bits, SRC())
+      +restore = U32.and(U32.shrn(bits, 10n), SRC())
+      St{env, fs.bits(10n, U32.or(normal, restore), 1, fs, line, sink), ret, tor(revived, restore)}
 
 def st.ret(st: St, +t: U32) -> St:
   match st:
-    case St{env, fs, ret}:
-      St{env, fs, tor(ret, t)}
+    case St{env, fs, ret, revived}:
+      St{env, fs, tor(ret, t), revived}
 
 def st.env(st: St) -> Map<&2, U32>:
   match st:
-    case St{env, fs, ret}:
+    case St{env, fs, ret, revived}:
       env
+
+def st.revived(st: St) -> U32:
+  match st:
+    case St{env, fs, ret, revived}:
+      revived
 
 # ---------------------------------------------------------------- nodes
 
@@ -961,7 +990,7 @@ def m.known(m: Model) -> Bool:
 def model_apply(m: Model, +ts: List<&2, U32>, +rv: U32, st: St, +line: U32, +name: String) -> Res:
   match m:
     case Model{sc, sa, ra, clr, src, rcv}:
-      Res{tor(tor(tclr(mask_or(ts, ra), clr), src), b2t(nz(rcv), rv)), [], st.find(st, line, U32.and(mask_or(ts, sa), sc), name)}
+      Res{tor(tor(tclr(mask_or(ts, ra), clr), src), b2t(nz(rcv), rv)), [], st.find(st, line, sink.bits(mask_or(ts, sa), sc), name)}
 
 # OR over i of ts[i] & ms[i].
 def zip_or(ts: List<&2, U32>, ms: List<&2, U32>) -> U32:
@@ -971,12 +1000,24 @@ def zip_or(ts: List<&2, U32>, ms: List<&2, U32>) -> U32:
     case a b:
       0
 
+# Apply decoder-restored sink classes when the corresponding argument has
+# any remaining request taint, even if the caller cleared that sink's class.
+def zip_revived(ts: List<&2, U32>, revived: List<&2, U32>) -> U32:
+  match ts revived:
+    case Con{t, tr} Con{r, rr}:
+      tor(b2t(nz(U32.and(t, SRC())), r), zip_revived(tr, rr))
+    case a b:
+      0
+
 def sum_apply(s: Sum, +m: Model, +ts: List<&2, U32>, +rv: U32, st: St, +line: U32, +name: String) -> Res:
   match s:
     case NoSum{}:
       model_apply(m, ts, rv, st, line, name)
-    case Sum{src, props, sinks}:
-      Res{tor(src, zip_or(ts, props)), [], st.find(st, line, zip_or(ts, sinks), name ++ "()")}
+    case Sum{src, props, sinks, revived}:
+      +normal = zip_or(ts, sinks)
+      +restored = zip_revived(ts, revived)
+      +hits = U32.or(normal, U32.shln(restored, 10n))
+      Res{tor(src, zip_or(ts, props)), [], st.find(st, line, hits, name ++ "()")}
 
 # Builtin models win for methods (query, prepare, ...) unless unknown.
 def meth_apply(+m: Model, s: Sum, +ts: List<&2, U32>, +rv: U32, +st: St, +line: U32, +name: String) -> Res:
@@ -991,7 +1032,7 @@ def cb_sum(s: Sum, m: Model, +u: U32) -> U32:
   match s:
     case NoSum{}:
       cb_model(m, u)
-    case Sum{src, props, sinks}:
+    case Sum{src, props, sinks, revived}:
       tor(src, U32.and(u, or_list(props)))
 
 def cb_mod(+cb: String) -> Model:
@@ -1010,14 +1051,17 @@ def call_apply(ci: CallI, +ts: List<&2, U32>, +st: St, +cx: Map<&2, Sum>) -> Res
     case CallI{k, n, c, l, rv, 2, cb, a, r}:
       Res{0, [], st}
     case CallI{k, n, c, l, rv, 4, cb, a, r}:
-      Res{0, [], st.find(st, l, U32.and(mask_or(ts, 4), 64), "curl_setopt")}
+      Res{0, [], st.find(st, l, sink.bits(mask_or(ts, 4), 64), "curl_setopt")}
     case CallI{k, n, c, l, rv, 5, cb, a, r}:
       Res{cb_apply(cb, or_list(tail(ts)), cx), [], st}
     case CallI{k, n, c, l, rv, 6, cb, a, r}:
       model_apply(m.sink(512, 1, 0), ts, rv, st, l, n)
-    # Decoding restores characters that an earlier sanitizer removed or encoded.
+    # Decoding restores classes, and marks summary flows for restored sinks.
     case CallI{k, n, c, l, rv, 7, cb, a, r}:
-      Res{b2t(nz(U32.and(mask_or(ts, 1), SRC())), SRC()), [], st}
+      +taint = mask_or(ts, 1)
+      +out = b2t(nz(U32.and(taint, SRC())), SRC())
+      +restored = b2t(nz(U32.and(taint, SUMMARY_MARKER())), RESTORED())
+      Res{U32.or(out, restored), [], st}
     case CallI{0, +n, c, l, rv, s, cb, a, r}:
       sum_apply(sum.get(cx, n), fmodel(n), ts, rv, st, l, n)
     case CallI{1, +n, c, l, rv, s, cb, a, r}:
@@ -1025,7 +1069,7 @@ def call_apply(ci: CallI, +ts: List<&2, U32>, +st: St, +cx: Map<&2, Sum>) -> Res
     case CallI{2, +n, c, l, rv, s, cb, a, r}:
       meth_apply(smodel(c, n), sum.get(cx, "->" ++ n), ts, rv, st, l, "::" ++ n)
     case CallI{k, n, c, l, rv, s, cb, a, r}:
-      Res{or_list(ts), [], st.find(st, l, U32.and(rv, 4), "dynamic call")}
+      Res{or_list(ts), [], st.find(st, l, sink.bits(rv, 4), "dynamic call")}
 
 def mk_call(+kind: U32, +name: String, cls: String, line: U32, recv: U32, +args: List<&2, T.Node>, rest: List<&2, T.Node>) -> CallI:
   +ps = args_of(args)
@@ -1169,8 +1213,8 @@ def assign(lhs: List<&2, T.Node>, +op: String, +t: U32, +env: Map<&2, U32>) -> M
 
 def asg_st(lhs: List<&2, T.Node>, +op: String, +t: U32, st: St) -> Res:
   match st:
-    case St{env, fs, ret}:
-      Res{t, [], St{assign(lhs, op, t, env), fs, ret}}
+    case St{env, fs, ret, revived}:
+      Res{t, [], St{assign(lhs, op, t, env), fs, ret, revived}}
 
 # How an expression starts:
 #   100 empty  110 print  111 include/require  112 yield/throw  102 closure
@@ -1398,28 +1442,28 @@ type Job is Data:
 
 def st_ret(st: St) -> U32:
   match st:
-    case St{env, fs, ret}:
+    case St{env, fs, ret, revived}:
       ret
 
 def st.fs(st: St) -> List<&2, Finding>:
   match st:
-    case St{env, fs, ret}:
+    case St{env, fs, ret, revived}:
       fs
 
 def st.join(pre: Map<&2, U32>, st: St) -> St:
   match st:
-    case St{env, fs, ret}:
-      St{env.join(pre, env), fs, ret}
+    case St{env, fs, ret, revived}:
+      St{env.join(pre, env), fs, ret, revived}
 
 def st.restore(env: Map<&2, U32>, ret: U32, st: St) -> St:
   match st:
-    case St{env2, fs, ret2}:
-      St{env, fs, ret}
+    case St{env2, fs, ret2, revived}:
+      St{env, fs, ret, revived}
 
 def st.set_all(vs: List<&2, String>, +t: U32, st: St) -> St:
   match st:
-    case St{env, fs, ret}:
-      St{env.set_all(vs, env, t), fs, ret}
+    case St{env, fs, ret, revived}:
+      St{env.set_all(vs, env, t), fs, ret, revived}
 
 def drop1(ns: List<&2, T.Node>) -> List<&2, T.Node>:
   match ns:
@@ -1455,7 +1499,7 @@ def step_k(r: Res, k: Kont, +cx: Map<&2, Sum>) -> Job:
     case Res{t, ts, st}:
       match k:
         case KSink{cls, line, name}:
-          JDone{Res{0, [], st.find(st, line, U32.and(t, cls), name)}}
+          JDone{Res{0, [], st.find(st, line, sink.bits(t, cls), name)}}
         case KMask{m}:
           JDone{Res{U32.and(t, m), [], st}}
         case KOr{t2}:
@@ -1650,7 +1694,7 @@ def j.prim1(+rest: List<&2, T.Node>, code: U32, +s: String, +l: U32, +h: T.Node,
       Post{istr(st.env(st), s), "", rest, st}
     case 7:
       +t = istr(st.env(st), s)
-      Post{t, "", rest, st.find(st, l, U32.and(t, 2), "backtick")}
+      Post{t, "", rest, st.find(st, l, sink.bits(t, 2), "backtick")}
     case 40:
       JThen{Ex{node_kids(h), st}, KPost{"", rest}}
     case 91:
@@ -1868,7 +1912,7 @@ def step(j: Job, +cx: Map<&2, Sum>) -> Job:
 def an(fuel: Nat, job: Job, +cx: Map<&2, Sum>) -> Res:
   match fuel:
     case 0n:
-      Res{0, [], St{MTip{}, [Finding{0, 0, "fuel"}], 0}}
+      Res{0, [], St{MTip{}, [Finding{0, 0, "fuel"}], 0, 0}}
     case 1n+(+p):
       match job:
         case JDone{r}:
@@ -2043,18 +2087,20 @@ def decls(fuel: Nat, ds: DS) -> List<&2, Decl>:
 
 # ---------------------------------------------------------------- summaries
 
-def bind(ps: List<&2, Param>, +idx: U32, +i: U32, +env: Map<&2, U32>) -> Map<&2, U32>:
-  match ps:
-    case Nil{}:
+def bind(ps: List<&2, Param>, +idx: U32, +i: U32, +env: Map<&2, U32>, seed: Seed) -> Map<&2, U32>:
+  match ps seed:
+    case Nil{} s:
       env
-    case Con{Param{name, num}, rest}:
-      bind(rest, idx, U32.add(i, 1), env.set(env, name, b2t(U32.is_eq(i, idx) && Bool.not(num), SRC())))
+    case Con{Param{name, num}, rest} SrcSeed{}:
+      bind(rest, idx, U32.add(i, 1), env.set(env, name, b2t(U32.is_eq(i, idx) && Bool.not(num), SRC())), SrcSeed{})
+    case Con{Param{name, num}, rest} MarkerSeed{}:
+      bind(rest, idx, U32.add(i, 1), env.set(env, name, b2t(U32.is_eq(i, idx) && Bool.not(num), U32.or(SRC(), SUMMARY_MARKER()))), MarkerSeed{})
 
-# Analyze a declaration's body with parameter idx bound to request input.
-def run(fuel: Nat, d: Decl, +idx: U32, +cx: Map<&2, Sum>) -> Res:
+# Analyze a declaration's body with parameter idx bound to request input or a summary marker.
+def run(fuel: Nat, d: Decl, +idx: U32, +cx: Map<&2, Sum>, seed: Seed) -> Res:
   match d:
     case Decl{key, ps, body}:
-      an(fuel, Stmts{body, St{bind(ps, idx, 0, MTip{}), [], 0}}, cx)
+      an(fuel, Stmts{body, St{bind(ps, idx, 0, MTip{}, seed), [], 0, 0}}, cx)
 
 def res_st(r: Res) -> St:
   match r:
@@ -2077,15 +2123,15 @@ def fs.new(fs: List<&2, Finding>, +base: List<&2, Finding>) -> U32:
       tor(b2t(Bool.not(fs.has(base, l, c)), c), fs.new(rest, base))
 
 type PS is Data:
-  PS{prop: U32, sink: U32}
+  PS{prop: U32, sink: U32, revived: U32}
 
 def sum.one(fuel: Nat, +d: Decl, +i: U32, +cx: Map<&2, Sum>, +base: List<&2, Finding>, p: Param) -> PS:
   match p:
     case Param{name, True{}}:
-      PS{0, 0}
+      PS{0, 0, 0}
     case Param{name, False{}}:
-      +st = res_st(run(fuel, d, i, cx))
-      PS{st_ret(st), fs.new(st.fs(st), base)}
+      +st = res_st(run(fuel, d, i, cx, MarkerSeed{}))
+      PS{U32.and(st_ret(st), SRC()), fs.new(st.fs(st), base), st.revived(st)}
 
 def sum.params(ps: List<&2, Param>, +fuel: Nat, +d: Decl, +i: U32, +cx: Map<&2, Sum>, +base: List<&2, Finding>) -> List<&2, PS>:
   match ps:
@@ -2099,15 +2145,22 @@ def ps.props(xs: List<&2, PS>) -> List<&2, U32>:
   match xs:
     case Nil{}:
       []
-    case Con{PS{a, b}, rest}:
+    case Con{PS{a, b, c}, rest}:
       Con{a, ps.props(rest)}
 
 def ps.sinks(xs: List<&2, PS>) -> List<&2, U32>:
   match xs:
     case Nil{}:
       []
-    case Con{PS{a, b}, rest}:
+    case Con{PS{a, b, c}, rest}:
       Con{b, ps.sinks(rest)}
+
+def ps.revived(xs: List<&2, PS>) -> List<&2, U32>:
+  match xs:
+    case Nil{}:
+      []
+    case Con{PS{a, b, c}, rest}:
+      Con{c, ps.revived(rest)}
 
 type KS is Data:
   KS{key: String, sum: Sum}
@@ -2123,9 +2176,9 @@ def decl_key(d: Decl) -> String:
       key
 
 def sum.decl(+fuel: Nat, +d: Decl, +cx: Map<&2, Sum>) -> KS:
-  +st = res_st(run(fuel, d, 65535, cx))
+  +st = res_st(run(fuel, d, 65535, cx, SrcSeed{}))
   +xs = sum.params(decl_ps(d), fuel, d, 0, cx, st.fs(st))
-  KS{decl_key(d), Sum{st_ret(st), ps.props(xs), ps.sinks(xs)}}
+  KS{decl_key(d), Sum{st_ret(st), ps.props(xs), ps.sinks(xs), ps.revived(xs)}}
 
 def sum.decls(ds: List<&2, Decl>, +fuel: Nat, +cx: Map<&2, Sum>) -> List<&2, KS>:
   match ds:
@@ -2149,10 +2202,10 @@ def sum.merge(a: Sum, b: Sum) -> Sum:
   match a b:
     case NoSum{} b2:
       b2
-    case Sum{s, p, k} NoSum{}:
-      Sum{s, p, k}
-    case Sum{s, p, k} Sum{s2, p2, k2}:
-      Sum{tor(s, s2), zip_or_list(p, p2), zip_or_list(k, k2)}
+    case Sum{s, p, k, r} NoSum{}:
+      Sum{s, p, k, r}
+    case Sum{s, p, k, r} Sum{s2, p2, k2, r2}:
+      Sum{tor(s, s2), zip_or_list(p, p2), zip_or_list(k, k2), zip_or_list(r, r2)}
 
 def sum.put(kss: List<&2, KS>, +m: Map<&2, Sum>) -> Map<&2, Sum>:
   match kss:
@@ -2170,7 +2223,7 @@ def decl_fs(ds: List<&2, Decl>, +fuel: Nat, +cx: Map<&2, Sum>) -> List<&2, Findi
     case Nil{}:
       []
     case Con{d, rest}:
-      a b = st.fs(res_st(run(fuel, d, 65535, cx))) decl_fs(rest, fuel, cx)
+      a b = st.fs(res_st(run(fuel, d, 65535, cx, SrcSeed{}))) decl_fs(rest, fuel, cx)
       List.concat(&2, Finding, [a, b])
 
 # ---------------------------------------------------------------- entry
@@ -2242,5 +2295,5 @@ def scan(src: String) -> List<&2, Finding>:
   +fuel = Nat.add(Nat.mul(List.length(&2, L.Tok, ts), 16n), 4096n)
   +ds = decls(fuel, DS{[DW{ns, False{}}], []})
   +cx = round(ds, fuel, round(ds, fuel, round(ds, fuel, MTip{})))
-  top fs2 = st.fs(res_st(an(fuel, Stmts{ns, St{MTip{}, [], 0}}, cx))) decl_fs(ds, fuel, cx)
+  top fs2 = st.fs(res_st(an(fuel, Stmts{ns, St{MTip{}, [], 0, 0}}, cx))) decl_fs(ds, fuel, cx)
   f.sort(suppress(List.concat(&2, Finding, [top, fs2]), toks.ign(ts, 0)), [])
