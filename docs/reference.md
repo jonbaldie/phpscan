@@ -83,7 +83,9 @@ that passes tainted data into that function.
 Sanitizer models clear selected classes. `htmlspecialchars` clears XSS and
 header taint but does not clear SQL taint. `escapeshellarg` clears command
 taint. `basename` clears path and inclusion taint. Numeric conversions clear
-all classes. Placeholder queries with separately bound parameters are not
+all classes. `html_entity_decode`, `htmlspecialchars_decode`, and
+`wp_kses_decode_entities` restore every class to request data that earlier
+sanitizers cleared. Placeholder queries with separately bound parameters are not
 flagged, but a tainted query string passed to `prepare` can be flagged.
 These models are heuristics, not proofs that the actual PHP operation is safe.
 
@@ -104,6 +106,7 @@ the suppression in project code.
 
 - The scanner uses a tokenizer and bracket tree, not a complete PHP parser. Invalid PHP can produce a clean result. Unusual syntax can be misread.
 - Function summaries stay within a file. Cross-file calls, object state passed between methods, `global`, and values stored across requests can be missed.
+- A decoder restores sanitized taint only within one function. A value sanitized by a caller and decoded inside a called function is missed.
 - Method names from different classes can share a summary. This can cause false positives.
 - Sanitizers and framework models lack full context. Encoding, SQL dialects, shell syntax, and application authorization can change the real risk.
 - Summary propagation uses three rounds. Some recursive or deep call chains can be missed without a `PHP-INCOMPLETE` report.
