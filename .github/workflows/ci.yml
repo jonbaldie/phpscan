@@ -1,0 +1,158 @@
+name: CI and release
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  platforms:
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.matrix.outputs.value }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - id: matrix
+        run: echo "value=$(jq -c . scripts/platforms.json)" >> "$GITHUB_OUTPUT"
+      - name: Check release tag
+        if: startsWith(github.ref, 'refs/tags/')
+        run: test "$GITHUB_REF_NAME" = "v$(bash scripts/version.sh)"
+
+  native:
+    needs: platforms
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.platforms.outputs.matrix) }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: '1.3.14'
+      - name: Build and test Linux with a glibc 2.35 baseline
+        if: runner.os == 'Linux'
+        run: |
+          docker run --rm -v "$GITHUB_WORKSPACE:/work" -w /work \
+            -v "$(command -v bun):/usr/local/bin/bun:ro" \
+            ubuntu:22.04@sha256:0a9887931b0e38af2e3487ed39e29436b0535c4f3f52e57745baaf79d1898956 \
+            bash -euc '
+              apt-get update -qq
+              apt-get install -y -qq clang-14 make curl ca-certificates python3 git
+              git config --global --add safe.directory /work
+              export CC=clang-14
+              make setup build test lint package
+              bash scripts/verify-archive.sh dist/phpscan-*.tar.gz
+            '
+      - name: Build and test macOS
+        if: runner.os == 'macOS'
+        run: |
+          make setup build test lint package
+          bash scripts/verify-archive.sh dist/phpscan-*.tar.gz
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: native-${{ matrix.os }}-${{ matrix.arch }}
+          path: dist/phpscan-${{ matrix.os }}-${{ matrix.arch }}.tar.gz
+          if-no-files-found: error
+
+  php-versions:
+    needs: native
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['8.2', '8.3', '8.4', '8.5']
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # v2
+        with:
+          php-version: ${{ matrix.php }}
+          coverage: none
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: native-linux-x86_64
+          path: dist
+      - run: tar -xzf dist/phpscan-linux-x86_64.tar.gz -C dist phpscan
+      - name: Validate version-specific syntax
+        env:
+          PHP_VERSION: ${{ matrix.php }}
+        run: |
+          php --version
+          for file in tests/versions/php8*.php; do
+            need="8.$(basename "$file" .php | sed 's/^php8//')"
+            if [ "$(printf '%s\n%s\n' "$need" "$PHP_VERSION" | sort -V | head -1)" = "$need" ]; then want=pass; else want=fail; fi
+            if php -l "$file" >/dev/null 2>&1; then got=pass; else got=fail; fi
+            echo "$file on $PHP_VERSION: $got (want $want)"
+            test "$got" = "$want"
+          done
+          bash tests/check.sh ./dist/phpscan tests/versions/*.php
+
+  cves:
+    needs: native
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: native-linux-x86_64
+          path: dist
+      - run: tar -xzf dist/phpscan-linux-x86_64.tar.gz -C dist phpscan
+      - run: make cves
+      - name: Produce a CI report from a vulnerable fixture
+        run: |
+          set +e
+          ./dist/phpscan --format=sarif tests/cases/taint.php > dist/example.sarif
+          code=$?
+          test "$code" -eq 1
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: scan-example
+          path: dist/example.sarif
+          if-no-files-found: error
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [native, php-versions, cves]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: native-*
+          merge-multiple: true
+          path: release
+      - name: Verify asset set and publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for asset in $(jq -r '.include[] | "phpscan-\(.os)-\(.arch).tar.gz"' scripts/platforms.json); do
+            test -s "release/$asset"
+          done
+          (cd release && sha256sum phpscan-*.tar.gz > SHA256SUMS)
+          cp install.sh release/
+          gh release create "$GITHUB_REF_NAME" release/* --verify-tag \
+            --title "phpscan $GITHUB_REF_NAME" --notes-file docs/release-notes.md
+
+  verify-published:
+    needs: [platforms, publish]
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.platforms.outputs.matrix) }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Install the public release and execute it
+        run: |
+          export PHPSCAN_INSTALL_DIR="$RUNNER_TEMP/phpscan-bin"
+          sh install.sh "$GITHUB_REF_NAME"
+          "$PHPSCAN_INSTALL_DIR/phpscan" --version
+          python3 tests/test_cli.py "$PHPSCAN_INSTALL_DIR/phpscan"
+          bash tests/check.sh "$PHPSCAN_INSTALL_DIR/phpscan" tests/cases/*.php tests/versions/*.php

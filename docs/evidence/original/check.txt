@@ -1,0 +1,8 @@
+# fixture check — 2026-10-23T20:52:45Z — bend 2.0.38, Darwin arm64
+$ tests/check.sh phpscan tests/cases/*.php tests/versions/*.php
+PASS tests/cases/taint.php (19 findings)
+PASS tests/versions/php82.php (2 findings)
+PASS tests/versions/php83.php (2 findings)
+PASS tests/versions/php84.php (3 findings)
+PASS tests/versions/php85.php (4 findings)
+exit=0

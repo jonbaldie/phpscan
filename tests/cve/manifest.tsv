@@ -1,0 +1,10 @@
+# cve	version	role	expect	sha256	url
+# expect: RULE@LINE must be reported; !RULE@LINE must not be; LINE * means any line.
+CVE-2017-9841	phpunit-5.6.2	vulnerable	PHP-CODEI@3	64589452b166cb815b3f7ab28324bd743fc606e7a3a8ca207d2faa313e5d4cf3	https://raw.githubusercontent.com/sebastianbergmann/phpunit/5.6.2/src/Util/PHP/eval-stdin.php
+CVE-2017-9841	phpunit-5.6.3	fixed	!PHP-CODEI@*	37a7e4fae0d4dd40e004725043c0f328846eb0e5277472c3225b0fdc40c93067	https://raw.githubusercontent.com/sebastianbergmann/phpunit/5.6.3/src/Util/PHP/eval-stdin.php
+CVE-2019-9978	social-warfare-3.5.2	vulnerable	PHP-CODEI@250	5c457f5435e3446d7fecbfd5760700e0981179e09101b0adfbd98a727a9f029f	https://plugins.svn.wordpress.org/social-warfare/tags/3.5.2/lib/utilities/SWP_Database_Migration.php
+CVE-2019-9978	social-warfare-3.5.3	fixed	!PHP-CODEI@*	f911c82cc26be27c84e0f2fe73b6e4435f718094f1da2964057ae12040461a62	https://plugins.svn.wordpress.org/social-warfare/tags/3.5.3/lib/utilities/SWP_Database_Migration.php
+CVE-2022-46169	cacti-1.2.22	vulnerable	PHP-CMDI@385	2453928a78cb54bdab1a7396b2d0f5d38abe1dc5d3df4656fea5d63fded4e1ad	https://raw.githubusercontent.com/Cacti/cacti/release/1.2.22/remote_agent.php
+CVE-2022-46169	cacti-1.2.23	fixed	!PHP-CMDI@*	d5d1ff5bd4c07e93d5846283583ba97305e85e361b45fec96f131c96330f0153	https://raw.githubusercontent.com/Cacti/cacti/release/1.2.23/remote_agent.php
+CVE-2022-0739	bookingpress-1.0.10	vulnerable	PHP-SQLI@1166	bdb2653d36b00f332ccff1a71913277b9a5048b1740caee17d25b7ca3c713103	https://plugins.svn.wordpress.org/bookingpress-appointment-booking/tags/1.0.10/core/classes/frontend/class.bookingpress_appointment_bookings.php
+CVE-2022-0739	bookingpress-1.0.11	fixed	!PHP-SQLI@1173	a4d74aa809c2a7cd4cb30f401e2022ccad86de836934cfa93c260cfcfbf1b2a1	https://plugins.svn.wordpress.org/bookingpress-appointment-booking/tags/1.0.11/core/classes/frontend/class.bookingpress_appointment_bookings.php

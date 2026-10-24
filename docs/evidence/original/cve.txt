@@ -1,0 +1,42 @@
+# real CVE regression (pinned upstream files, sha256-checked) — 2026-10-23T20:52:53Z — bend 2.0.38, Darwin arm64
+$ tests/cve.sh phpscan
+PASS CVE-2017-9841 phpunit-5.6.2 (vulnerable) expect PHP-CODEI@3 sha256 ok
+    eval-stdin.php:3: [PHP-CODEI] code injection: request data reaches eval (CWE-95)
+PASS CVE-2017-9841 phpunit-5.6.3 (fixed) expect !PHP-CODEI@* sha256 ok
+PASS CVE-2019-9978 social-warfare-3.5.2 (vulnerable) expect PHP-CODEI@250 sha256 ok
+    SWP_Database_Migration.php:231: [PHP-PATH] path traversal: request data reaches file_get_contents (CWE-22)
+    SWP_Database_Migration.php:250: [PHP-CODEI] code injection: request data reaches eval (CWE-95)
+    SWP_Database_Migration.php:276: [PHP-XSS] cross-site scripting: request data reaches wp_die (CWE-79)
+    SWP_Database_Migration.php:279: [PHP-XSS] cross-site scripting: request data reaches wp_die (CWE-79)
+    SWP_Database_Migration.php:313: [PHP-XSS] cross-site scripting: request data reaches ->reset_post_meta_float_location() (CWE-79)
+PASS CVE-2019-9978 social-warfare-3.5.3 (fixed) expect !PHP-CODEI@* sha256 ok
+    SWP_Database_Migration.php:247: [PHP-XSS] cross-site scripting: request data reaches ->reset_post_meta_float_location() (CWE-79)
+PASS CVE-2022-46169 cacti-1.2.22 (vulnerable) expect PHP-CMDI@385 sha256 ok
+    remote_agent.php:238: [PHP-XSS] cross-site scripting: request data reaches print (CWE-79)
+    remote_agent.php:262: [PHP-XSS] cross-site scripting: request data reaches print (CWE-79)
+    remote_agent.php:285: [PHP-XSS] cross-site scripting: request data reaches print (CWE-79)
+    remote_agent.php:385: [PHP-CMDI] OS command injection: request data reaches proc_open (CWE-78)
+    remote_agent.php:431: [PHP-XSS] cross-site scripting: request data reaches print (CWE-79)
+PASS CVE-2022-46169 cacti-1.2.23 (fixed) expect !PHP-CMDI@* sha256 ok
+    remote_agent.php:238: [PHP-XSS] cross-site scripting: request data reaches print (CWE-79)
+    remote_agent.php:262: [PHP-XSS] cross-site scripting: request data reaches print (CWE-79)
+    remote_agent.php:285: [PHP-XSS] cross-site scripting: request data reaches print (CWE-79)
+    remote_agent.php:431: [PHP-XSS] cross-site scripting: request data reaches print (CWE-79)
+PASS CVE-2022-0739 bookingpress-1.0.10 (vulnerable) expect PHP-SQLI@1166 sha256 ok
+    class.bookingpress_appointment_bookings.php:574: [PHP-SQLI] SQL injection: request data reaches ->get_results (CWE-89)
+    class.bookingpress_appointment_bookings.php:585: [PHP-SQLI] SQL injection: request data reaches ->get_results (CWE-89)
+    class.bookingpress_appointment_bookings.php:942: [PHP-XSS] cross-site scripting: request data reaches echo (CWE-79)
+    class.bookingpress_appointment_bookings.php:956: [PHP-XSS] cross-site scripting: request data reaches echo (CWE-79)
+    class.bookingpress_appointment_bookings.php:970: [PHP-XSS] cross-site scripting: request data reaches echo (CWE-79)
+    class.bookingpress_appointment_bookings.php:984: [PHP-XSS] cross-site scripting: request data reaches echo (CWE-79)
+    class.bookingpress_appointment_bookings.php:1048: [PHP-XSS] cross-site scripting: request data reaches echo (CWE-79)
+    class.bookingpress_appointment_bookings.php:1166: [PHP-SQLI] SQL injection: request data reaches ->get_results (CWE-89)
+PASS CVE-2022-0739 bookingpress-1.0.11 (fixed) expect !PHP-SQLI@1173 sha256 ok
+    class.bookingpress_appointment_bookings.php:574: [PHP-SQLI] SQL injection: request data reaches ->get_results (CWE-89)
+    class.bookingpress_appointment_bookings.php:585: [PHP-SQLI] SQL injection: request data reaches ->get_results (CWE-89)
+    class.bookingpress_appointment_bookings.php:942: [PHP-XSS] cross-site scripting: request data reaches echo (CWE-79)
+    class.bookingpress_appointment_bookings.php:956: [PHP-XSS] cross-site scripting: request data reaches echo (CWE-79)
+    class.bookingpress_appointment_bookings.php:970: [PHP-XSS] cross-site scripting: request data reaches echo (CWE-79)
+    class.bookingpress_appointment_bookings.php:984: [PHP-XSS] cross-site scripting: request data reaches echo (CWE-79)
+    class.bookingpress_appointment_bookings.php:1048: [PHP-XSS] cross-site scripting: request data reaches echo (CWE-79)
+exit=0

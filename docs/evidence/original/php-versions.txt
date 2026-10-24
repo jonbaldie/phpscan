@@ -1,0 +1,23 @@
+# PHP version lint matrix (docker php:<v>-cli) — 2026-10-23T20:52:45Z — bend 2.0.38, Darwin arm64
+$ tests/lint-matrix.sh
+php:8.2-cli 8.2.35
+php:8.3-cli 8.3.36
+php:8.4-cli 8.4.27
+php:8.5-cli 8.5.12
+OK php82 on 8.2: lint pass (want pass): No syntax errors detected in /src/php82.php
+OK php82 on 8.3: lint pass (want pass): No syntax errors detected in /src/php82.php
+OK php82 on 8.4: lint pass (want pass): No syntax errors detected in /src/php82.php
+OK php82 on 8.5: lint pass (want pass): No syntax errors detected in /src/php82.php
+OK php83 on 8.2: lint fail (want fail): Parse error: syntax error, unexpected identifier "BIN", expecting "=" in /src/php83.php on line 6
+OK php83 on 8.3: lint pass (want pass): No syntax errors detected in /src/php83.php
+OK php83 on 8.4: lint pass (want pass): No syntax errors detected in /src/php83.php
+OK php83 on 8.5: lint pass (want pass): No syntax errors detected in /src/php83.php
+OK php84 on 8.2: lint fail (want fail): Fatal error: Multiple access type modifiers are not allowed in /src/php84.php on line 6
+OK php84 on 8.3: lint fail (want fail): Fatal error: Multiple access type modifiers are not allowed in /src/php84.php on line 6
+OK php84 on 8.4: lint pass (want pass): No syntax errors detected in /src/php84.php
+OK php84 on 8.5: lint pass (want pass): No syntax errors detected in /src/php84.php
+OK php85 on 8.2: lint fail (want fail): Parse error: syntax error, unexpected identifier "load" in /src/php85.php on line 14
+OK php85 on 8.3: lint fail (want fail): Parse error: syntax error, unexpected identifier "load" in /src/php85.php on line 14
+OK php85 on 8.4: lint fail (want fail): Parse error: syntax error, unexpected identifier "load" in /src/php85.php on line 14
+OK php85 on 8.5: lint pass (want pass): No syntax errors detected in /src/php85.php
+exit=0
