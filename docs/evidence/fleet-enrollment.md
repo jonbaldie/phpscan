@@ -6,8 +6,8 @@ Verified on 2026-10-24. This is an installation snapshot, not the Fleet registry
 
 Fleet's private Gogs `jon/fleet` repository landed registration commit
 `53dfe4b67fde2f85cdb9404fe7b1e86fb08c1d4d` through `fleet-land`.
-The canonical checkout is `~/Code/github.com/jonbaldie/phpscan`.
-It was appended without changing existing repository order or discovery offsets.
+The registration appended phpscan without changing existing repository order
+or discovery offsets.
 The repository is staged: automatic work is disabled; manual requests are available.
 
 The first real install exposed a Fleet bug: legacy rollback reconciliation
@@ -23,7 +23,7 @@ after the real installation succeeded.
 
 After `fleet-manager install --repo phpscan`:
 
-- Every role derived from Fleet's registered pipeline definitions was present in `launchctl print gui/501/<label>`.
+- Every role from Fleet's registered pipeline definitions appeared in the loaded service list.
 - The loaded arguments referenced the canonical checkout. Loaded definitions matched installed plists, and neither had calendars for this staged repository.
 - Previously loaded services remained loaded. Active PIDs, existing plist bytes, and source configuration hashes were unchanged.
 - The live installation still reported `legacy (rolled back)`. This enrollment did not change the fleet-wide control mode or claim event-active operation.
@@ -31,11 +31,8 @@ After `fleet-manager install --repo phpscan`:
 - The local adapters paginate every result page, exclude pull requests, and sort by creation time and issue number. Controlled transport probes covered multiple pages, ordering ties, query failures, and malformed responses.
 - The GitHub release policy names the documented workflow and exact archive/checksum/installer asset set.
 
-The local verification trail is under the workspace's
-`.audit/phpscan-release/`: `fleet-loaded-roles.json`,
-`fleet-operational-before.json`, `fleet-after-status.txt`, `fleet-after-events.json`,
-`fleet-rollback-red.txt`, `fleet-rollback-green.txt`, and `fleet-rollback-land.txt`.
-These files are local operational evidence, not publicly hosted Fleet logs.
+Fleet's detailed operational logs are private. This snapshot summarizes the
+installation checks but does not provide public raw logs.
 
 ## Automatic-work boundary
 

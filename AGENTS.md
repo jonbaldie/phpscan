@@ -1,6 +1,9 @@
 # Work on phpscan
 
-phpscan is a native PHP taint scanner written in Bend. Preserve its scanner
+Build phpscan to identify security vulnerabilities and CVEs in source code for
+public, internet-facing PHP applications. The current Bend scanner detects
+unsafe uses of request data. CVE advisory matching and checks for calls to
+affected dependency code are not implemented yet. Preserve the scanner
 implementation when changing distribution code.
 
 ## Complete a change
@@ -18,6 +21,7 @@ release evidence.
 ## Read when the task applies
 
 - **Scanner rules or parsing.** Read [rule behavior and limits](docs/reference.md). Keep findings deterministic and incomplete analyses at exit 2.
+- **CVE detection.** Read [CVE coverage](docs/reference.md#cve-coverage). Verify advisory and version matches separately from possible calls to affected code. Report missing evidence as unknown.
 - **Installer or release.** Read [release procedure](docs/releasing.md). Test the installed archive and checksum rejection before publishing.
 - **CI examples.** Read [CI integration](docs/ci.md). Preserve exit 1 for findings and exit 2 for failures when uploading reports.
 - **Issues or triage.** Read [issue tracker](docs/agents/issue-tracker.md) and [triage labels](docs/agents/triage-labels.md).

@@ -4,12 +4,12 @@ This record describes actions in the extraction/release session, not an
 independent review. Only one coding agent was available. Parallel sub-agents
 and cross-model review were not run. Role reviews used fresh serial passes.
 [The read audit](skill-reads.json) records source hashes and successful
-read-tool timestamps derived from the local session transcript. It proves
+read-tool timestamps derived from the session transcript. It proves
 those reads occurred; it is not an independent assessment of this work.
 
 ## `/writing-for-agents`
 
-Read `/Users/jonathanbaldie/.agents/skills/writing-for-agents/SKILL.md`.
+Read the `writing-for-agents` skill.
 SHA-256: `551adca942227b44192edba88acd4e8db911f0121ce58ad16944ccf6a896a74a`.
 
 The skill changed the documentation structure:
@@ -28,12 +28,11 @@ The first-scan command is verified with the actual native binary.
 
 ## `/poteto-mode`
 
-Read `/Users/jonathanbaldie/Code/pstack/.agents/skills/poteto-mode/SKILL.md`.
+Read the `poteto-mode` skill.
 SHA-256: `923d54375f398f1850c7cf4465fa805bc2938c6fc2e43a561f7dbfbf9bf7b937`.
 
 The session read the router, autonomous-run playbook, and the leaf skills below
-before applying their principles. A plan and decision log live in the local
-workspace audit at `.audit/phpscan-release/`.
+before applying their principles.
 
 | Read leaf | Decision it changed |
 | --- | --- |

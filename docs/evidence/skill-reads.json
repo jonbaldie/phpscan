@@ -1,19 +1,30 @@
 {
-  "session": "01a16dce-3555-72b3-a2e1-2252ae82548b",
-  "audit_scope": "Actual read-tool calls and successful responses in the local session transcript; not independent review",
+  "audit_scope": "Successful read-tool results from the release and documentation reviews. Private source paths and session identifiers are omitted. This is not independent review.",
   "skills": [
     {
       "skill": "writing-for-agents",
-      "source": "/Users/jonathanbaldie/.agents/skills/writing-for-agents/SKILL.md",
       "sha256": "551adca942227b44192edba88acd4e8db911f0121ce58ad16944ccf6a896a74a",
       "first_read_utc": "2026-10-24T12:09:50.401Z",
       "read_tool_succeeded": true
     },
     {
       "skill": "poteto-mode",
-      "source": "/Users/jonathanbaldie/Code/pstack/.agents/skills/poteto-mode/SKILL.md",
       "sha256": "923d54375f398f1850c7cf4465fa805bc2938c6fc2e43a561f7dbfbf9bf7b937",
       "first_read_utc": "2026-10-24T12:09:50.401Z",
+      "read_tool_succeeded": true
+    }
+  ],
+  "documentation_review": [
+    {
+      "skill": "unslop",
+      "sha256": "195411d320b5b328f9f642baf59757ed19aaf0931c0838740e0aca273d538dc1",
+      "read_completed_utc": "2026-10-24T19:19:34.154Z",
+      "read_tool_succeeded": true
+    },
+    {
+      "skill": "writing-for-agents",
+      "sha256": "551adca942227b44192edba88acd4e8db911f0121ce58ad16944ccf6a896a74a",
+      "read_completed_utc": "2026-10-24T19:19:34.155Z",
       "read_tool_succeeded": true
     }
   ]

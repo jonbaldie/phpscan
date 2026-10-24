@@ -21,7 +21,7 @@
 
 ## Tests and verification
 
-- Run the real scanner or installer and assert literal output, exit status, or filesystem changes.
+- Run the real scanner, installer, or documentation checker and assert literal output, exit status, or filesystem changes.
 - Keep fixture `expect:` comments independent of scanner output. Check missing and unexpected findings and the scanner's exit status.
 - Pair clean inputs with vulnerable inputs. Treat download errors and incomplete scans as failures, never clean results.
 - Control only external transport in installer tests. Execute the actual installed binary afterward.
@@ -34,4 +34,9 @@ Write commands a new user can copy. Show the expected result and exit status.
 Keep README.md focused on installation and the first scan. Put CI, reference,
 and contributor procedures in their linked task-specific documents.
 Use short instructions with explicit completion checks in agent documents.
+Keep README.md and AGENTS.md free of cached release and toolchain versions.
+Link to the relevant source or reference for those details. Retain deliberate
+pins in CI examples and versions in historical evidence and license identifiers.
+Use repository-relative paths or public URLs in all documentation and evidence.
+Keep private machine paths and operational log locations out of the repository.
 Keep comments for reasons the code cannot show.

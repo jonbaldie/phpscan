@@ -6,7 +6,7 @@ Bend is Copyright 2026 BendAI and licensed under Apache-2.0.
 The complete license is in [licenses/Bend-Apache-2.0.txt](licenses/Bend-Apache-2.0.txt)
 and every binary archive includes it.
 
-The scanner came from Jonathan Baldie's local `bend/phpscan` tool at commit
+The scanner extraction source revision is
 `0a75438189e8309fc67241c004ac85f2eb721979`. The extracted scanner law and proof
 cover suppression only. They do not prove vulnerability detection is complete.
 
