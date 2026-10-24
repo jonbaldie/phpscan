@@ -3,6 +3,9 @@
 This record describes actions in the extraction/release session, not an
 independent review. Only one coding agent was available. Parallel sub-agents
 and cross-model review were not run. Role reviews used fresh serial passes.
+[The read audit](skill-reads.json) records source hashes and successful
+read-tool timestamps derived from the local session transcript. It proves
+those reads occurred; it is not an independent assessment of this work.
 
 ## `/writing-for-agents`
 
@@ -40,6 +43,7 @@ workspace audit at `.audit/phpscan-release/`.
 | `principle-sequence-verifiable-units` | Verified the original baseline, extraction, archives, publication, and fleet enrollment separately. |
 | `principle-model-the-domain` | Put the version in one module and the supported platform tuples in one matrix file. |
 | `principle-test-behavior-not-implementation` | Asserted real CLI output, exit codes, reports, and installer filesystem effects. |
+| `principle-fix-root-causes` | Reproduced Fleet's missing-role installation bug through its public CLI, fixed rollback reconciliation, and repeated the real installation instead of manually loading plists. Also isolated the native build stall to C emission and verified the phased replacement on every target; see [build recovery](build-memory.md). |
 
 The design pass traced source ownership and the compiler/runtime boundary,
 compared native archives with a runtime launcher, and chose native archives.
@@ -51,8 +55,8 @@ packaging code and changed CLI blocks, with no application-code edits or
 comment deletions required. Preserved scanner files were excluded from comment
 cleanup to keep the extraction byte-identical. No lint suppressions were added.
 
-The test-evidence audit found all 19 Python test methods production-grounded:
-10 execute the native CLI; 9 execute the real installer. Their assertions trace
+The test-evidence audit found all 20 Python test methods production-grounded:
+10 execute the native CLI; 10 execute the real installer. Their assertions trace
 to stdout/stderr, exit status, report JSON, installed bytes, or preservation of
 an existing binary. Only download transport is controlled locally. Public
 release verification uses real HTTPS downloads instead.
@@ -66,5 +70,10 @@ autonomous run, so the interactive setup template's defaults were selected
 without an interview. Tracker, triage, domain, and shipping policies are
 recorded under `docs/agents/`.
 
-Membership and installed-state evidence are recorded separately after the
-Fleet change lands. A registry edit alone is not proof of a loaded service.
+[The enrollment verification](fleet-enrollment.md) distinguishes shipped
+membership, actual loaded roles, and staged manual operation. The first live
+installation failed its loaded-role check despite returning success. The
+root-cause fix and red/green regression shipped separately in Fleet before the
+installation was repeated. Existing jobs, active PIDs, definitions, and source
+configuration were verified unchanged. A registry edit alone was not accepted
+as proof of a loaded service.

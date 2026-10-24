@@ -20,6 +20,8 @@ skills, their actual source hashes, the choices they changed, and the checks
 used on README.md and AGENTS.md.
 [The release design](../release-design.md) records the source trace, alternatives,
 and serial execution limits of this session.
+[The build recovery record](build-memory.md) shows the observed native-runner
+stall, profiling, portability check, and successful replacement CI.
 
 ## Repeat the checks
 
@@ -30,5 +32,10 @@ platform tuples. Tagged runs also install and execute the public release.
 Subprocess tests check actual findings, reports, exit codes, installed bytes,
 and refusal to overwrite an existing binary after a corrupt download.
 
-Public-release and fleet-registration evidence is added after those operations
-complete. Local compilation and desired fleet configuration do not prove either.
+[Fleet enrollment verification](fleet-enrollment.md) records the shipped
+registry changes, actual loaded roles, and staged/manual control mode.
+The [v0.1.0 release record](https://github.com/jonbaldie/phpscan/releases/tag/v0.1.0)
+is the destination for published asset checksums, the tag-workflow result, and
+actual public-install results. Those outcomes are recorded in the release notes
+after publication, without creating a new unreleased source commit. Local
+compilation and pre-publication CI do not prove that a public release exists.

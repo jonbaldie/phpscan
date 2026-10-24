@@ -52,6 +52,7 @@ if [ "$version" != latest ]; then
   [ "$installed_version" = "phpscan ${version#v}" ] || fail 'The binary version does not match the requested release.'
 fi
 mkdir -p "$dest"
+[ ! -d "$dest/phpscan" ] || fail 'The destination phpscan is a directory.'
 stage=$(mktemp "$dest/.phpscan.XXXXXX")
 install -m 755 "$tmp/unpack/phpscan" "$stage"
 mv -f "$stage" "$dest/phpscan"

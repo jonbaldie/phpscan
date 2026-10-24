@@ -94,6 +94,18 @@ shutil.copyfile(pathlib.Path(os.environ['TEST_TRANSPORT']) / name, args[args.ind
         self.assert_preserved(result)
         self.assertIn('Checksum mismatch', result.stderr)
 
+    def test_directory_target_is_rejected_and_preserved(self):
+        self.target.unlink()
+        self.target.mkdir()
+        marker = self.target / 'keep'
+        marker.write_text('existing directory\n')
+        result = self.install('v0.1.0')
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertIn('is a directory', result.stderr)
+        self.assertEqual(marker.read_text(), 'existing directory\n')
+        self.assertEqual([p.name for p in self.target.iterdir()], ['keep'])
+        self.assertEqual(list(self.dest.glob('.phpscan.*')), [])
+
     def test_missing_and_duplicate_checksums(self):
         valid = self.manifest.read_text()
         for contents in ['', valid + valid]:
