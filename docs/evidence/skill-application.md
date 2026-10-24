@@ -40,6 +40,7 @@ workspace audit at `.audit/phpscan-release/`.
 | `principle-sequence-verifiable-units` | Verified the original baseline, extraction, archives, publication, and fleet enrollment separately. |
 | `principle-model-the-domain` | Put the version in one module and the supported platform tuples in one matrix file. |
 | `principle-test-behavior-not-implementation` | Asserted real CLI output, exit codes, reports, and installer filesystem effects. |
+| `principle-fix-root-causes` | Reproduced Fleet's missing-role installation bug through its public CLI, fixed rollback reconciliation, and repeated the real installation instead of manually loading plists. |
 
 The design pass traced source ownership and the compiler/runtime boundary,
 compared native archives with a runtime launcher, and chose native archives.
@@ -66,5 +67,10 @@ autonomous run, so the interactive setup template's defaults were selected
 without an interview. Tracker, triage, domain, and shipping policies are
 recorded under `docs/agents/`.
 
-Membership and installed-state evidence are recorded separately after the
-Fleet change lands. A registry edit alone is not proof of a loaded service.
+[The enrollment verification](fleet-enrollment.md) distinguishes shipped
+membership, actual loaded roles, and staged manual operation. The first live
+installation failed its loaded-role check despite returning success. The
+root-cause fix and red/green regression shipped separately in Fleet before the
+installation was repeated. Existing jobs, active PIDs, definitions, and source
+configuration were verified unchanged. A registry edit alone was not accepted
+as proof of a loaded service.

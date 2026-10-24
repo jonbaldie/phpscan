@@ -30,5 +30,7 @@ platform tuples. Tagged runs also install and execute the public release.
 Subprocess tests check actual findings, reports, exit codes, installed bytes,
 and refusal to overwrite an existing binary after a corrupt download.
 
-Public-release and fleet-registration evidence is added after those operations
-complete. Local compilation and desired fleet configuration do not prove either.
+[Fleet enrollment verification](fleet-enrollment.md) records the shipped
+registry changes, actual loaded roles, and staged/manual control mode.
+Public-release evidence is added after publication. Local compilation does not
+prove that a public release exists.
