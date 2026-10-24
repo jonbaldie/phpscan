@@ -42,6 +42,6 @@ checked the actual result rather than relying on that inspection alone.
 - Local `make setup build test lint cves package` and archive verification passed. A separate `make compile test` reused C without emitting it again.
 - Missing C and invalid build-stage arguments returned 2. No analysis-module changes were made: lexer, tree, and scanner still matched the extraction source byte for byte.
 
-The native jobs exercise fixture findings, 10 CLI tests, 9 real-installer tests,
-and archive installation/execution. Controlled local download transport is
+The native jobs in those runs exercised fixture findings, 10 CLI tests,
+9 real-installer tests, and archive installation/execution. Controlled local download transport is
 not evidence of publication. Only tagged workflows install public assets.

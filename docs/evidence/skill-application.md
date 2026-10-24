@@ -55,8 +55,8 @@ packaging code and changed CLI blocks, with no application-code edits or
 comment deletions required. Preserved scanner files were excluded from comment
 cleanup to keep the extraction byte-identical. No lint suppressions were added.
 
-The test-evidence audit found all 19 Python test methods production-grounded:
-10 execute the native CLI; 9 execute the real installer. Their assertions trace
+The test-evidence audit found all 20 Python test methods production-grounded:
+10 execute the native CLI; 10 execute the real installer. Their assertions trace
 to stdout/stderr, exit status, report JSON, installed bytes, or preservation of
 an existing binary. Only download transport is controlled locally. Public
 release verification uses real HTTPS downloads instead.
