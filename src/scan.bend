@@ -939,6 +939,12 @@ def spec.fn(name: String, +ps: List<&2, List<&2, T.Node>>) -> U32:
       L.sel(U32, String.is_empty(cb_name(ps)) || String.eq(cb_name(ps), "->"), u => 0, u => 5)
     case "parse_str":
       L.sel(U32, U32.is_eq(U32.from_nat(List.length(&2, List<&2, T.Node>, ps)), 1), u => 6, u => 0)
+    case "html_entity_decode":
+      7
+    case "htmlspecialchars_decode":
+      7
+    case "wp_kses_decode_entities":
+      7
     case _:
       0
 
@@ -1009,6 +1015,9 @@ def call_apply(ci: CallI, +ts: List<&2, U32>, +st: St, +cx: Map<&2, Sum>) -> Res
       Res{cb_apply(cb, or_list(tail(ts)), cx), [], st}
     case CallI{k, n, c, l, rv, 6, cb, a, r}:
       model_apply(m.sink(512, 1, 0), ts, rv, st, l, n)
+    # Decoding restores characters that an earlier sanitizer removed or encoded.
+    case CallI{k, n, c, l, rv, 7, cb, a, r}:
+      Res{b2t(nz(U32.and(mask_or(ts, 1), SRC())), SRC()), [], st}
     case CallI{0, +n, c, l, rv, s, cb, a, r}:
       sum_apply(sum.get(cx, n), fmodel(n), ts, rv, st, l, n)
     case CallI{1, +n, c, l, rv, s, cb, a, r}:

@@ -23,6 +23,12 @@ echo (int) $_GET['n'];
 readfile(basename($_GET['f']));
 echo json_encode($_GET); // expect: PHP-XSS
 
+// --- decoding after a sanitizer restores what it removed (pattern of CVE-2026-115497)
+readfile(wp_kses_decode_entities(basename($_GET['f']))); // expect: PHP-PATH
+echo html_entity_decode(htmlspecialchars($_GET['q'])); // expect: PHP-XSS
+readfile(basename(wp_kses_decode_entities($_GET['f'])));
+echo htmlspecialchars_decode(intval($_GET['n']));
+
 // --- propagation through variables, arrays, concatenation, interpolation
 $a = $_GET['a'];
 $b = "pre-$a-post";
