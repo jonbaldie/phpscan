@@ -39,7 +39,10 @@ version tags fixed.
 1. Query `gh release view "v$version" --repo jonbaldie/phpscan` and check the assets.
 2. Install with `PHPSCAN_INSTALL_DIR="$(mktemp -d)" sh install.sh "v$version"`.
 3. Run `--version`, a vulnerable scan, a sanitized scan, and SARIF output with the installed binary.
-4. Record the release URL, tag revision, CI run URL, downloaded checksums, and actual results in `docs/evidence/`.
+4. Append the release URL, tag revision, CI run URL, downloaded checksums, and actual results to the GitHub release notes. Link that release record from `docs/evidence/`.
+
+Keep post-publication outcomes in the release record so recording them does not
+create another unreleased source commit.
 
 Done means the release is public, all expected assets exist, the tag workflow
 including public-install verification is green, and the installed CLI behaves

@@ -20,6 +20,8 @@ skills, their actual source hashes, the choices they changed, and the checks
 used on README.md and AGENTS.md.
 [The release design](../release-design.md) records the source trace, alternatives,
 and serial execution limits of this session.
+[The build recovery record](build-memory.md) shows the observed native-runner
+stall, profiling, portability check, and successful replacement CI.
 
 ## Repeat the checks
 
@@ -32,5 +34,8 @@ and refusal to overwrite an existing binary after a corrupt download.
 
 [Fleet enrollment verification](fleet-enrollment.md) records the shipped
 registry changes, actual loaded roles, and staged/manual control mode.
-Public-release evidence is added after publication. Local compilation does not
-prove that a public release exists.
+The [v0.1.0 release record](https://github.com/jonbaldie/phpscan/releases/tag/v0.1.0)
+is the destination for published asset checksums, the tag-workflow result, and
+actual public-install results. Those outcomes are recorded in the release notes
+after publication, without creating a new unreleased source commit. Local
+compilation and pre-publication CI do not prove that a public release exists.
