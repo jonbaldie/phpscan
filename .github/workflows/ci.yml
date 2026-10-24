@@ -23,8 +23,24 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         run: test "$GITHUB_REF_NAME" = "v$(bash scripts/version.sh)"
 
-  native:
+  generate:
     needs: platforms
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: '1.3.14'
+      - run: make setup generate lint
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: generated-c
+          path: dist/phpscan.c
+          if-no-files-found: error
+
+  native:
+    needs: [platforms, generate]
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.platforms.outputs.matrix) }}
@@ -35,6 +51,10 @@ jobs:
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
           bun-version: '1.3.14'
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: generated-c
+          path: dist
       - name: Build and test Linux with a glibc 2.35 baseline
         if: runner.os == 'Linux'
         run: |
@@ -46,13 +66,13 @@ jobs:
               apt-get install -y -qq clang-14 make curl ca-certificates python3 git
               git config --global --add safe.directory /work
               export CC=clang-14
-              make setup build test lint package
+              make setup compile test package
               bash scripts/verify-archive.sh dist/phpscan-*.tar.gz
             '
       - name: Build and test macOS
         if: runner.os == 'macOS'
         run: |
-          make setup build test lint package
+          make setup compile test package
           bash scripts/verify-archive.sh dist/phpscan-*.tar.gz
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:

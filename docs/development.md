@@ -26,6 +26,20 @@ Native builds embed Bend's runtime. They do not launch Bend or Bun when users
 run the scanner. The scanner invokes `find` and `cat` with literal arguments.
 The toolchain stays in ignored `.tools/`. Build output stays in ignored `dist/`.
 
+## Build stages and memory
+
+`make generate` checks the suppression proof and incomplete-status regression,
+then emits portable `dist/phpscan.c`. `make compile` requires that generated C
+and builds the host's native binary and build metadata. `make build` runs both
+stages, preserving the normal contributor command.
+
+C emission can exceed 16 GB of peak memory footprint on macOS; low-memory
+machines can swap heavily. CI generates C once on Linux, then compiles and
+executes it on every supported native target. Source checks run in the
+C-generation job; native workers run fixture, CLI, installer, and archive checks.
+Use generated C from the same checkout's trusted generation step. `make compile`
+alone is not source verification.
+
 ## Add a regression
 
 For a rule change, add a PHP fixture in `tests/cases/`. Put `// expect: RULE`

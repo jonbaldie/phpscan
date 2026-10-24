@@ -17,9 +17,11 @@
 4. Run `git push origin "v$version"`.
 5. Wait for the tag's complete `CI and release` workflow to pass.
 
-The workflow builds every tuple from `scripts/platforms.json`, tests each
-native binary and archive, checks the PHP syntax matrix and CVE regressions,
-and publishes the archives with `SHA256SUMS` and `install.sh`.
+The workflow generates portable C once on Linux, then compiles every tuple
+from `scripts/platforms.json` natively. This keeps the high-memory Bend emission
+step off low-memory native workers. It tests each native binary and archive,
+checks the PHP syntax matrix and CVE regressions, and publishes the archives
+with `SHA256SUMS` and `install.sh`.
 Linux builds use a pinned Ubuntu 22.04 image and clang 14 for a glibc 2.35
 baseline. macOS builds target macOS 13. Archives contain the binary,
 build metadata, and both project and runtime licenses.
