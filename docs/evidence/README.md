@@ -2,8 +2,8 @@
 
 ## Source provenance
 
-The scanner was extracted from Jonathan Baldie's local `bend/phpscan` at
-commit `0a75438189e8309fc67241c004ac85f2eb721979`.
+The scanner extraction source revision is
+`0a75438189e8309fc67241c004ac85f2eb721979`.
 `src/lex.bend`, `src/tree.bend`, and `src/scan.bend` preserve the original source.
 The standalone CLI adds help, a version, GitHub property escaping, and the
 correct precedence of incomplete-analysis status over findings.
@@ -11,7 +11,8 @@ correct precedence of incomplete-analysis status over findings.
 [The extraction baseline](original/extraction-fixtures.txt) records the original
 native binary's fixture run. Other files under `original/` are historical
 upstream run outputs copied from the source tool. They are not evidence of
-this release's hosted build.
+this release's hosted build. The extraction report now uses this repository's
+relative fixture paths. Finding counts are unchanged.
 
 ## Documentation and engineering method
 
@@ -22,6 +23,8 @@ used on README.md and AGENTS.md.
 and serial execution limits of this session.
 [The build recovery record](build-memory.md) shows the observed native-runner
 stall, profiling, portability check, and successful replacement CI.
+[The documentation review](documentation-review.md) records the version and
+path audit, concrete `/unslop` edits, and documentation-policy checks.
 
 ## Repeat the checks
 
@@ -29,8 +32,8 @@ Run `make setup build test lint cves package`, then
 `bash scripts/verify-archive.sh dist/phpscan-*.tar.gz`.
 The [workflow](../../.github/workflows/ci.yml) runs native checks on all four
 platform tuples. Tagged runs also install and execute the public release.
-Subprocess tests check actual findings, reports, exit codes, installed bytes,
-and refusal to overwrite an existing binary after a corrupt download.
+Subprocess tests check findings, reports, exit codes, and installed bytes.
+They also check that a corrupt download leaves an existing binary unchanged.
 
 [Fleet enrollment verification](fleet-enrollment.md) records the shipped
 registry changes, actual loaded roles, and staged/manual control mode.

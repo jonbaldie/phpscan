@@ -24,6 +24,32 @@ Overlapping input directories can scan a file more than once.
 An empty directory returns 0. Paths with newline characters are unsupported.
 Use `./` before a path whose name starts with `-`.
 
+## Supported platforms
+
+Native archives support Linux with glibc 2.35 or later and macOS 13 or later,
+on x86_64 or arm64. The CLI uses the system's `find` and `cat` commands.
+Windows and Alpine/musl are not supported. macOS binaries are not notarized.
+
+## CVE coverage
+
+A CVE identifies a known vulnerability. A CWE describes a type of weakness.
+The scanner reports weakness rules such as `PHP-CODEI` and their CWEs. It does
+not report CVE identifiers, read advisory records, or identify installed
+vulnerable dependency versions. It also does not check whether an application
+can call code named in a CVE advisory. These are gaps in phpscan's intended
+CVE checking, not capabilities supplied by its current rules.
+
+The [CVE regression manifest](../tests/cve/manifest.tsv) names exact vulnerable
+and fixed upstream PHP files. `make cves` downloads and verifies those files,
+then checks for an expected rule finding or its absence. The test harness
+supplies the CVE identifier. The scanner does not infer it. Passing these
+cases does not establish general detection of those CVEs in a PHP project.
+
+For CVE detection work, verify the advisory identifier, affected versions,
+and any available affected-function metadata. Keep a version match separate
+from evidence that the application can call the affected code. State when
+that evidence is unavailable. A possible call is not proof of exploitation.
+
 ## Rules
 
 The table gives examples, not every modeled function.
