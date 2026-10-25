@@ -52,7 +52,9 @@ that evidence is unavailable. A possible call is not proof of exploitation.
 
 ## Rules
 
-The table gives examples, not every modeled function.
+The table gives examples, not every modeled function. BuddyPress
+`bp_locate_template()` is modeled as an inclusion sink because the framework's
+template loader consumes its result.
 
 | Rule | CWE | Example sinks |
 | --- | --- | --- |
@@ -61,7 +63,7 @@ The table gives examples, not every modeled function.
 | PHP-CODEI | 95 | `eval`, `assert`, `create_function`, dynamic callbacks |
 | PHP-XSS | 79 | `echo`, `print`, `printf`, `die`, `exit`, `wp_die` |
 | PHP-PATH | 22 | `file_get_contents`, `fopen`, `readfile`, `unlink`, `file_put_contents` |
-| PHP-LFI | 98 | `include`, `require`, `include_once`, `require_once` |
+| PHP-LFI | 98 | `include`, `require`, `include_once`, `require_once`, BuddyPress `bp_locate_template` |
 | PHP-SSRF | 918 | `curl_init`, `CURLOPT_URL`, `fsockopen`, `wp_remote_get` |
 | PHP-DESER | 502 | `unserialize`, `maybe_unserialize` |
 | PHP-HEADER | 113 | `header`, `wp_redirect` |
@@ -76,9 +78,11 @@ modeled request functions. `$_ENV`, `GLOBALS`, and uninitialized session data
 are not request sources in this version.
 
 Taint propagates through variables, arrays, interpolation, branches, loops,
-closures, and function summaries within a file. Unknown functions pass argument
-taint through. A finding inside a user function can appear at the caller
-that passes tainted data into that function.
+closures, and function summaries within a file. `parse_str($query, $result)`
+propagates query taint into the result array; without a result array it is a
+variable-overwrite sink. Unknown functions pass argument taint through. A
+finding inside a user function can appear at the caller that passes tainted
+data into that function.
 
 Sanitizer models clear selected classes. `htmlspecialchars` clears XSS and
 header taint but does not clear SQL taint. `escapeshellarg` clears command

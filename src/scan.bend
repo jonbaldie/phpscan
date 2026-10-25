@@ -831,7 +831,12 @@ def fmodel.tab() -> List<&2, EntM>:
   Nil{}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}
 
 def fmodel(+name: String) -> Model:
-  entm.find(fmodel.tab(), name, clean_fn(name))
+  match name:
+    # BuddyPress consumes this lookup as a template include.
+    case "bp_locate_template":
+      m.sink(32, 1, 0)
+    case _:
+      entm.find(fmodel.tab(), name, clean_fn(name))
 
 def request_recv(cls: String) -> Bool:
   match cls:
@@ -893,6 +898,7 @@ def smodel(cls: String, +name: String) -> Model:
 # Calls whose meaning depends on literal arguments.
 #   1 result is request input  2 result is clean  4 curl_setopt URL
 #   5 dispatch to a literal callback  6 parse_str into the local scope
+#   8 parse_str into a result array
 def first_str(ps: List<&2, List<&2, T.Node>>) -> String:
   match ps:
     case Con{Con{T.Leaf{L.Tok{2, s, l}}, Nil{}}, r}:
@@ -967,7 +973,7 @@ def spec.fn(name: String, +ps: List<&2, List<&2, T.Node>>) -> U32:
     case "call_user_func_array":
       L.sel(U32, String.is_empty(cb_name(ps)) || String.eq(cb_name(ps), "->"), u => 0, u => 5)
     case "parse_str":
-      L.sel(U32, U32.is_eq(U32.from_nat(List.length(&2, List<&2, T.Node>, ps)), 1), u => 6, u => 0)
+      L.sel(U32, U32.is_eq(U32.from_nat(List.length(&2, List<&2, T.Node>, ps)), 1), u => 6, u => L.sel(U32, U32.is_eq(U32.from_nat(List.length(&2, List<&2, T.Node>, ps)), 2), v => 8, v => 0))
     case "html_entity_decode":
       7
     case "htmlspecialchars_decode":
@@ -1044,6 +1050,13 @@ def cb_apply(+cb: String, +u: U32, +cx: Map<&2, Sum>) -> U32:
   +mo = cb_mod(cb)
   L.sel(U32, m.known(mo), u2 => cb_model(mo, u), u2 => cb_sum(sum.get(cx, cb), mo, u))
 
+def parse_str_result(+args: List<&2, List<&2, T.Node>>, +ts: List<&2, U32>, st: St) -> Res:
+  match args ts st:
+    case Con{_, Con{+result, _}} Con{input_t, _} St{env, fs, ret, revived}:
+      Res{0, [], St{env.set_all(vars_in(result, []), env, input_t), fs, ret, revived}}
+    case _ _ _:
+      Res{0, [], st}
+
 def call_apply(ci: CallI, +ts: List<&2, U32>, +st: St, +cx: Map<&2, Sum>) -> Res:
   match ci:
     case CallI{k, n, c, l, rv, 1, cb, a, r}:
@@ -1057,6 +1070,8 @@ def call_apply(ci: CallI, +ts: List<&2, U32>, +st: St, +cx: Map<&2, Sum>) -> Res
     case CallI{k, n, c, l, rv, 6, cb, a, r}:
       model_apply(m.sink(512, 1, 0), ts, rv, st, l, n)
     # Decoding restores classes, and marks summary flows for restored sinks.
+    case CallI{k, n, c, l, rv, 8, cb, a, r}:
+      parse_str_result(args_of(a), ts, st)
     case CallI{k, n, c, l, rv, 7, cb, a, r}:
       +taint = mask_or(ts, 1)
       +out = b2t(nz(U32.and(taint, SRC())), SRC())
