@@ -13,6 +13,12 @@ require $_GET['mod']; // expect: PHP-LFI
 file_get_contents($_GET['u']); // expect: PHP-PATH
 unserialize($_COOKIE['state']); // expect: PHP-DESER
 extract($_POST); // expect: PHP-VAROVR
+parse_str($_COOKIE['query'], $parsed);
+readfile($parsed['file']); // expect: PHP-PATH
+parse_str($_COOKIE['safe_query'], $safe_parsed);
+readfile(basename($safe_parsed['file']));
+bp_locate_template($_COOKIE['template']); // expect: PHP-LFI
+bp_locate_template('members/' . basename($_COOKIE['safe_template']) . '.php');
 
 // --- sanitizers
 mysqli_query($db, "SELECT * FROM t WHERE a = " . intval($_GET['a']));
