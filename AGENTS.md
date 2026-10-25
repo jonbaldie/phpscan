@@ -24,11 +24,23 @@ release evidence.
 - **CVE detection.** Read [CVE coverage](docs/reference.md#cve-coverage). Verify advisory and version matches separately from possible calls to affected code. Report missing evidence as unknown.
 - **Installer or release.** Read [release procedure](docs/releasing.md). Test the installed archive and checksum rejection before publishing.
 - **CI examples.** Read [CI integration](docs/ci.md). Preserve exit 1 for findings and exit 2 for failures when uploading reports.
-- **Issues or triage.** Read [issue tracker](docs/agents/issue-tracker.md) and [triage labels](docs/agents/triage-labels.md).
 - **Shipping.** Read [agent workflow](docs/agents/workflow.md).
-- **Domain terms or decisions.** Read [domain documentation](docs/agents/domain.md).
 - **Project provenance or prior verification.** Read [release evidence](docs/evidence/README.md). Historical logs describe their recorded runs, not current verification.
 
 `LAWS.bend` states the extracted scanner invariant. Preserve the law's meaning
 and update `PROOF.bend` with relevant implementation changes.
 Run `scripts/bend.sh PROOF.bend` to check it. The proof concerns suppression, not scanner completeness.
+
+## Agent skills
+
+### Issue tracker
+
+Issues live in `jonbaldie/phpscan` on GitHub. Read [issue tracker](docs/agents/issue-tracker.md) when working with issues or specifications.
+
+### Triage labels
+
+Use the five default triage roles. Read [triage labels](docs/agents/triage-labels.md) when classifying issues.
+
+### Domain docs
+
+Single-context: root `GLOSSARY.md` and `docs/adr/`. Read [domain documentation](docs/agents/domain.md) when naming concepts or recording decisions.
