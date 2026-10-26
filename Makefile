@@ -16,6 +16,7 @@ test:
 	bash tests/check.sh ./dist/phpscan tests/cases/*.php tests/versions/*.php
 	python3 tests/test_cli.py ./dist/phpscan
 	python3 tests/test_advisories.py ./dist/phpscan
+	python3 tests/test_symfony.py ./dist/phpscan
 	python3 tests/test_install.py ./dist/phpscan
 	python3 tests/test_docs.py
 

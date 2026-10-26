@@ -40,11 +40,16 @@ A CVE identifies a known vulnerability. A CWE describes a type of weakness.
 The source scanner reports weakness rules such as `PHP-CODEI` and their CWEs.
 The separate offline dependency scanner matches exact installed versions from
 `composer.lock` against a pinned, embedded [advisory catalog](../advisories/composer.json).
-The catalog currently covers only `livewire/livewire` CVE-2025-54068,
+The catalog covers `livewire/livewire` CVE-2025-54068,
 GHSA-29cq-5w36-x7w3, in `>=3.0.0-beta.1,<3.6.4`. Version 3.6.3 is affected.
 Version 3.6.4 is the first fix. The catalog records the discrepancy between the
 maintainer's structured range and prose and the reviewed Composer boundary.
-It is not a complete Composer advisory database.
+It also covers CVE-2025-64500 / GHSA-3rg7-wf37-54rm for
+`symfony/http-foundation` in `<5.4.50`, `>=6.0.0,<6.4.29`, and
+`>=7.0.0,<7.3.7`. The distinct `symfony/symfony` record starts its first
+interval at `2.0.0`; the later intervals are the same. The catalog records the
+maintainer's conflicting unbounded first monolithic interval and prefers the
+reviewed Composer range. It is not a complete Composer advisory database.
 
 Dependency findings report the installed version, interval, fix boundary,
 lockfile location, and dependency group. Both `packages` and `packages-dev`
@@ -69,8 +74,30 @@ A version match exits 1 unless analysis is incomplete. A completed no-match
 exits 0. This means no match in this limited snapshot, not a dependency safety
 certification. Text and GitHub messages identify dependency-version evidence.
 SARIF properties also separate the dependency group, version, interval, source
-URLs, catalog date, and range provenance. Affected-code evidence, runtime
-exposure, exploitation, and deployment remain unknown. The pinned Livewire
+URLs, catalog date, and range provenance. Symfony dependency matches can also
+carry possible path-prefix access check sites from sources within the same CLI
+path argument. A nested directory with `composer.json` or `composer.lock` does
+not supply evidence to its parent project. Its PHP files still receive the
+normal taint scan. Scanning a lockfile alone gives version-only evidence. Each site
+records source path, method/check lines, authorization marker line, receiver type,
+and prefix. SARIF keeps `sourceEvidence` and `relatedLocations` separate from
+dependency-version evidence. One dependency match remains one finding.
+
+The bounded Symfony profile resolves simple explicit imports and aliases for
+Illuminate or Symfony Request parameter types, and fully qualified types. It
+recognizes a direct `getPathInfo()` receiver in an exact
+`str_starts_with(..., '/prefix')` condition as the function's first statement.
+The braced branch must start with `abort_unless(auth()->check(), 403)`.
+This restriction excludes earlier receiver reassignment without guessing about
+intervening calls. Logging alone is not an access check. Union types, nullable
+types, unresolved types, complex imports, multiple or braced namespaces,
+malformed bracket sequences, and unsupported flows leave affected-code evidence
+unknown. Traversal fuel derives from the token count. Exhaustion exits 2.
+A source-line `phpscan-ignore` removes that site's evidence, not its dependency
+match. GitHub output adds notices at possible source locations.
+Possible evidence does not prove authorization bypass. Runtime exposure,
+exploitability, deployment, middleware registration, server configuration, and
+independent authorization remain unknown. The pinned Livewire
 record has no affected-function metadata. The scanner does not infer
 reachability from that absence and does not execute application code.
 

@@ -5,8 +5,9 @@ code of public, internet-facing PHP applications.
 
 The current scanner finds unsafe uses of request data and reports the file,
 line, and rule without running PHP. Source builds also match `composer.lock`
-versions against a pinned offline advisory snapshot. The scanner does not check
-whether your application can call the affected dependency code.
+versions against a pinned offline advisory snapshot. A bounded Symfony profile
+also reports possible path-prefix authorization checks. It does not establish
+runtime exposure or exploitability.
 See [CVE coverage](docs/reference.md#cve-coverage) for the catalog and limits.
 
 ## Install the CLI

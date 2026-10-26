@@ -47,5 +47,28 @@ def build(ts: List<&2, L.Tok>, cur: List<&2, Node>, stack: List<&2, Frame>) -> L
     case Con{t, rest} st:
       build(rest, Con{Leaf{t}, cur}, st)
 
+def balanced(ts: List<&2, L.Tok>, stack: List<&2, String>) -> Bool:
+  match ts stack:
+    case Nil{} Nil{}:
+      True{}
+    case Nil{} _:
+      False{}
+    case Con{L.Tok{5, "(", l}, rest} st:
+      balanced(rest, Con{")", st})
+    case Con{L.Tok{5, "[", l}, rest} st:
+      balanced(rest, Con{"]", st})
+    case Con{L.Tok{5, "#[", l}, rest} st:
+      balanced(rest, Con{"]", st})
+    case Con{L.Tok{5, "{", l}, rest} st:
+      balanced(rest, Con{"}", st})
+    case Con{L.Tok{5, +s, l}, +rest} Con{+expected, +st}:
+      L.sel(Bool, String.eq(s, ")") || String.eq(s, "]") || String.eq(s, "}"),
+        u => String.eq(s, expected) && balanced(rest, st),
+        u => balanced(rest, Con{expected, st}))
+    case Con{L.Tok{5, +s, l}, rest} Nil{}:
+      Bool.not(String.eq(s, ")") || String.eq(s, "]") || String.eq(s, "}")) && balanced(rest, [])
+    case Con{t, rest} st:
+      balanced(rest, st)
+
 def tree(ts: List<&2, L.Tok>) -> List<&2, Node>:
   build(ts, [], [])
