@@ -21,6 +21,11 @@ CI checks the same fixtures under each PHP version.
 `src/lex.bend` produces tokens. `src/tree.bend` groups bracketed tokens.
 `src/scan.bend` tracks taint and builds function summaries.
 `src/version.bend` owns the application version.
+`src/advisories.bend` owns inventory validation and dependency matches.
+`src/json.bend` parses lockfile JSON with source lines.
+`src/versions.bend` compares the supported exact SemVer subset.
+`src/catalog.bend` embeds the pinned advisory snapshot and is generated from
+`advisories/composer.json` by `scripts/catalog.py`.
 
 Native builds embed Bend's runtime. They do not launch Bend or Bun when users
 run the scanner. The scanner invokes `find` and `cat` with literal arguments.
@@ -49,8 +54,29 @@ line has multiple findings. Add the corresponding sanitized case too.
 and checks exit status.
 
 For arguments, output formatting, or discovery, add a subprocess assertion in
-`tests/test_cli.py`. For installation, add a filesystem or installed-binary
-assertion in `tests/test_install.py`.
+`tests/test_cli.py`. For dependency advisories, use `tests/test_advisories.py`.
+For installation, add a filesystem or installed-binary assertion in
+`tests/test_install.py`.
 
 Before sending a change, follow [the agent workflow](agents/workflow.md) and
 [CODING_STANDARDS.md](../CODING_STANDARDS.md).
+
+## Update the offline advisory catalog
+
+1. Retrieve the reviewed Composer record from GitHub's advisory API and the
+   maintainer advisory. Verify the package identity, affected interval, and fix
+   against the upstream patch or release.
+2. Edit `advisories/composer.json`. Record the snapshot date, upstream update
+   timestamp, source URLs, and any conflicting range metadata. Preserve empty
+   affected-function metadata rather than inventing a reachable function.
+   This first catalog supports inclusive lower and exclusive upper bounds.
+3. Run `python3 scripts/catalog.py` to regenerate `src/catalog.bend`.
+4. Add affected, fixed, and boundary subprocess cases to
+   `tests/test_advisories.py`. Keep version evidence separate from affected-code
+   or runtime evidence. Catalog changes require review of the pinned JSON diff.
+5. Run `make setup build test lint cves`. All checks must pass.
+
+Build and lint run `python3 scripts/catalog.py --check` and fail if the embedded
+catalog is stale. Catalog updates are offline source changes, not automatic
+runtime refreshes. The installed binary needs neither Python nor an advisory
+service.

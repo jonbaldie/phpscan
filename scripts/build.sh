@@ -6,6 +6,7 @@ stage=${1:-all}
 case "$stage" in all|generate|compile) ;; *) echo 'Usage: scripts/build.sh [generate|compile]' >&2; exit 2;; esac
 mkdir -p dist
 if [[ $stage != compile ]]; then
+  python3 scripts/catalog.py --check
   scripts/bend.sh PROOF.bend | tee dist/proof.txt
   grep -q '^ALL PROOFS CHECK$' dist/proof.txt
   scripts/bend.sh tests/status.bend | tee dist/status.txt
