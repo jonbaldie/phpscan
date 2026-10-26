@@ -196,6 +196,22 @@ class LaravelTests(unittest.TestCase):
         self.database.write_text(DATABASE.replace("'mysql'", '"mysql"'))
         self.assertEqual(self.finding()['properties']['affectedCode'], 'possible')
 
+    def test_block_string_identity_does_not_fabricate_a_guard_route_link(self):
+        for opener, body, middleware in [
+                ("<<<'GUARD'", 'api', 'auth:api\n'),
+                ('<<<GUARD', 'api', 'auth:api\n'),
+                ("<<<'GUARD'", r'a\pi', 'auth:a\\pi\n'),
+                ('<<<GUARD', r'a\pi', 'auth:api\n')]:
+            with self.subTest(opener=opener, body=body):
+                self.auth.write_text(AUTH.replace("'api' => [", opener + '\n' + body + '\nGUARD\n=> ['))
+                self.route.write_text(ROUTE.replace("'auth:api'", "'" + middleware + "'"))
+                props = self.finding()['properties']
+                self.assertEqual(props['affectedCode'], 'unknown')
+                self.assertEqual(props['sourceEvidence'], [])
+        self.auth.write_text(AUTH)
+        self.route.write_text(ROUTE)
+        self.assertEqual(self.finding()['properties']['affectedCode'], 'possible')
+
     def test_qualified_literal_policy_also_covers_symfony_without_changing_taint(self):
         self.inventory('7.3.6', 'symfony/http-foundation')
         source = self.root / 'Prefix.php'
