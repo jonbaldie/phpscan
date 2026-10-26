@@ -109,7 +109,12 @@ A candidate requires a literal `guards[name]` with `driver => 'token'`,
 
 Routes must be standalone, top-level statements of the exact form
 `Route::middleware('auth:<guard>')->get(<literal URI>, <action>);`.
-The action is not interpreted. The facade must have a simple explicit
+The `get` call requires exactly two explicit positional arguments, a literal
+quoted URI and a nonempty action, with one optional trailing comma.
+Commas inside nested arrays, calls, closures, or arrow-function parameters
+are not argument separators. The action is not interpreted.
+Extra top-level arguments, named arguments, and unpacked arguments leave the
+link unknown. The facade must have a simple explicit
 `use Illuminate\Support\Facades\Route;` import, a simple `as` alias, or the
 fully qualified `\Illuminate\Support\Facades\Route` name.
 Namespaces, grouped or conflicting imports, route groups, other HTTP methods,

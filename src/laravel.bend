@@ -207,10 +207,34 @@ def facade(xs: List<&2, Alias>, +name: String) -> Bool:
     case Con{Alias{n, t}, rest}:
       L.sel(Bool, String.eq(n, name), u => facade_target(t), u => facade(rest, name))
 
+def action_tail(ns: List<&2, T.Node>) -> Bool:
+  match ns:
+    case Nil{}:
+      True{}
+    case Con{T.Leaf{L.Tok{5, ",", l}}, Nil{}}:
+      True{}
+    case Con{T.Leaf{L.Tok{5, ",", l}}, rest}:
+      False{}
+    case Con{n, rest}:
+      action_tail(rest)
+
+def action_span(ns: List<&2, T.Node>) -> Bool:
+  match ns:
+    case Nil{}:
+      False{}
+    case Con{T.Leaf{L.Tok{5, ",", l}}, rest}:
+      False{}
+    case Con{T.Leaf{L.Tok{5, "...", l}}, rest}:
+      False{}
+    case Con{T.Leaf{L.Tok{1, name, l}}, Con{T.Leaf{L.Tok{5, ":", c}}, rest}}:
+      False{}
+    case Con{action, rest}:
+      action_tail(rest)
+
 def get_args(ns: List<&2, T.Node>) -> Bool:
   match ns:
-    case Con{T.Leaf{L.Tok{2, uri, l}}, Con{T.Leaf{L.Tok{5, ",", c}}, Con{action, rest}}}:
-      True{}
+    case Con{T.Leaf{L.Tok{2, uri, l}}, Con{T.Leaf{L.Tok{5, ",", c}}, rest}}:
+      action_span(rest)
     case _:
       False{}
 

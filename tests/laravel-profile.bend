@@ -60,11 +60,41 @@ def isolated(fs: List<&2, A.Finding>) -> Bool:
     case _:
       False{}
 
+def argument_tokens(unpacked: List<&2, L.Tok>, named: List<&2, L.Tok>) -> Bool:
+  match unpacked named:
+    case Con{L.Tok{5, "...", 1}, Con{L.Tok{0, "actions", 1}, Nil{}}}
+      Con{L.Tok{1, "action", 1}, Con{L.Tok{5, ":", 1}, Con{L.Tok{0, "handler", 1}, Nil{}}}}:
+      True{}
+    case _ _:
+      False{}
+
 def main() -> U32:
   +a = auth("'token'", "'eloquent'", "false")
   +r = route()
   ok = observed(profile(a, "'mysql'", r), "possible") &&
     observed(profile(a, "'mariadb'", r), "possible") &&
+    argument_tokens(L.qualified("<?php ...$actions"), L.qualified("<?php action: $handler")) &&
+    observed(profile(a, "'mysql'", "<?php\nuse Illuminate\\Support\\Facades\\Route;\nRoute::middleware('auth:api')->get('/x', [Controller::class, 'show']);"), "possible") &&
+    observed(profile(a, "'mysql'", "<?php\nuse Illuminate\\Support\\Facades\\Route;\nRoute::middleware('auth:api')->get('/x', handler('a', 'b'));"), "possible") &&
+    observed(profile(a, "'mysql'", "<?php\nuse Illuminate\\Support\\Facades\\Route;\nRoute::middleware('auth:api')->get('/x', fn () => 1,);"), "possible") &&
+    observed(profile(a, "'mysql'", "<?php\nuse Illuminate\\Support\\Facades\\Route;\nRoute::middleware('auth:api')->get('/x', fn ($a, $b) => [$a, $b]);"), "possible") &&
+    observed(profile(a, "'mysql'", "<?php\nuse Illuminate\\Support\\Facades\\Route;\nRoute::middleware('auth:api')->get('/x', function ($a, $b) use ($c, $d) { return [$a, $b]; });"), "possible") &&
+    observed(profile(a, "'mysql'", "<?php\nuse Illuminate\\Support\\Facades\\Route;\nRoute::middleware('auth:api')->get('/x', handler(action: 'show', options: [1, 2]),);"), "possible") &&
+    empty(profile(a, "'mysql'", "<?php use Illuminate\\Support\\Facades\\Route; Route::middleware('auth:api')->get();")) &&
+    empty(profile(a, "'mysql'", "<?php use Illuminate\\Support\\Facades\\Route; Route::middleware('auth:api')->get('/x');")) &&
+    empty(profile(a, "'mysql'", "<?php use Illuminate\\Support\\Facades\\Route; Route::middleware('auth:api')->get('/x',);")) &&
+    empty(profile(a, "'mysql'", "<?php use Illuminate\\Support\\Facades\\Route; Route::middleware('auth:api')->get(, fn () => 1);")) &&
+    empty(profile(a, "'mysql'", "<?php use Illuminate\\Support\\Facades\\Route; Route::middleware('auth:api')->get('/x',, fn () => 1);")) &&
+    empty(profile(a, "'mysql'", "<?php use Illuminate\\Support\\Facades\\Route; Route::middleware('auth:api')->get('/x', fn () => 1, 'extra');")) &&
+    empty(profile(a, "'mysql'", "<?php use Illuminate\\Support\\Facades\\Route; Route::middleware('auth:api')->get('/x', fn () => 1, 'extra',);")) &&
+    empty(profile(a, "'mysql'", "<?php use Illuminate\\Support\\Facades\\Route; Route::middleware('auth:api')->get('/x', fn () => 1,,);")) &&
+    empty(profile(a, "'mysql'", "<?php use Illuminate\\Support\\Facades\\Route; Route::middleware('auth:api')->get('/x', ...$actions);")) &&
+    empty(profile(a, "'mysql'", "<?php use Illuminate\\Support\\Facades\\Route; Route::middleware('auth:api')->get('/x', ...['show'],);")) &&
+    empty(profile(a, "'mysql'", "<?php use Illuminate\\Support\\Facades\\Route; Route::middleware('auth:api')->get('/x', action: fn () => 1);")) &&
+    empty(profile(a, "'mysql'", "<?php use Illuminate\\Support\\Facades\\Route; Route::middleware('auth:api')->get('/x', action: [Controller::class, 'show'],);")) &&
+    empty(profile(a, "'mysql'", "<?php use Illuminate\\Support\\Facades\\Route; Route::middleware('auth:api')->get(uri: '/x', action: fn () => 1);")) &&
+    empty(profile(a, "'mysql'", "<?php use Illuminate\\Support\\Facades\\Route; Route::middleware('auth:api')->get(...$args);")) &&
+    empty(profile(a, "'mysql'", "<?php use Illuminate\\Support\\Facades\\Route; Route::middleware('auth:api')->get($uri, fn () => 1);")) &&
     observed(profile(auth("\"token\"", "\"eloquent\"", "false"), "\"mysql\"", r), "possible") &&
     observed(profile(a, "\"my\\sql\"", r), "unknown") &&
     observed(profile(a, "<<<DB\nmysql\nDB\n", r), "unknown") &&
