@@ -151,6 +151,75 @@ class AdvisoryTests(unittest.TestCase):
                     self.assertIn('PHP-ADVISORY-INCOMPLETE', result.stdout)
                     self.assertIn('unknown', result.stdout)
 
+    def test_text_unsupported_versions_stay_on_one_line(self):
+        for version, rendered in [
+            ('dev-main', 'dev-main'),
+            ('dev-main\nFAKE.php:1: [PHP-XSS] forged finding',
+             r'dev-main\nFAKE.php:1: [PHP-XSS] forged finding'),
+            ('dev-main\rFAKE.php:1: [PHP-XSS] forged finding',
+             r'dev-main\rFAKE.php:1: [PHP-XSS] forged finding'),
+            ('dev-main\r\nFAKE.php:1: [PHP-XSS] forged finding',
+             r'dev-main\r\nFAKE.php:1: [PHP-XSS] forged finding'),
+            (r'dev-main\n café "quoted"', r'dev-main\n café "quoted"'),
+        ]:
+            with self.subTest(version=version):
+                self.inventory(version)
+                result = subprocess.run([str(BINARY), str(self.lock)],
+                                        capture_output=True, timeout=60)
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertEqual(result.stderr, b'phpscan: 1 files, 0 findings, 1 incomplete\n')
+                self.assertEqual(len(result.stdout.splitlines()), 1)
+                self.assertEqual(result.stdout.decode(),
+                                 f'{self.lock}:5: [PHP-ADVISORY-INCOMPLETE] '
+                                 'dependency advisory analysis unknown: unsupported installed version '
+                                 f'{rendered} in packages; expected an exact supported SemVer\n')
+
+    def test_text_dependency_paths_stay_on_one_line(self):
+        for name, rendered in [('ordinary', 'ordinary'), ('odd\rname', r'odd\rname')]:
+            with self.subTest(name=name):
+                directory = self.root / name
+                directory.mkdir()
+                self.inventory()
+                lock = directory / 'composer.lock'
+                self.lock.rename(lock)
+                result = self.scan(path=lock)
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertEqual(result.stderr, 'phpscan: 1 files, 1 findings, 0 incomplete\n')
+                self.assertEqual(len(result.stdout.splitlines()), 1)
+                self.assertEqual(result.stdout,
+                                 f'{self.root}/{rendered}/composer.lock:5: [{GHSA}] '
+                                 f'{CVE} / {GHSA}: livewire/livewire installed v3.6.3 (packages); '
+                                 'affected >=3.0.0-beta.1,<3.6.4; fixed 3.6.4; affected-code evidence unknown; '
+                                 'runtime exposure unknown; exploitability unknown; deployment unknown; '
+                                 'middleware registration unknown; server configuration unknown; '
+                                 'independent authorization unknown\n')
+
+    def test_text_source_evidence_stays_on_one_line(self):
+        self.inventory('7.3.6', 'symfony/http-foundation')
+        rule = 'GHSA-3rg7-wf37-54rm'
+        for prefix, rendered, auth in [
+            ('/admin', '/admin', 4),
+            ('/admin\nFAKE.php:1: [PHP-XSS] forged finding',
+             r'/admin\nFAKE.php:1: [PHP-XSS] forged finding', 5),
+            ('/admin\rFAKE.php:1: [PHP-XSS] forged finding',
+             r'/admin\rFAKE.php:1: [PHP-XSS] forged finding', 4),
+        ]:
+            with self.subTest(prefix=prefix):
+                source = self.root / 'app.php'
+                source.write_text('<?php\nfunction check(\\Illuminate\\Http\\Request $request) {\n'
+                                  "    if (str_starts_with($request->getPathInfo(), '" + prefix + "')) {\n"
+                                  '        abort_unless(auth()->check(), 403);\n    }\n}\n')
+                result = self.scan()
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertEqual(result.stderr, 'phpscan: 2 files, 1 findings, 0 incomplete\n')
+                self.assertEqual(len(result.stdout.splitlines()), 1)
+                self.assertTrue(result.stdout.startswith(f'{self.lock}:5: [{rule}] CVE-2025-64500 / {rule}: '))
+                self.assertIn('symfony/http-foundation installed 7.3.6 (packages); '
+                              'affected >=7.0.0,<7.3.7; fixed 7.3.7;', result.stdout)
+                self.assertIn(f'possible path-prefix access check at {source}:3 '
+                              f'(check line 3, authorization marker line {auth}, '
+                              f'receiver Illuminate\\Http\\Request, prefix {rendered})', result.stdout)
+
     def test_valid_json_metadata_escapes_and_source_preservation(self):
         self.lock.write_text(r'''{
   "packages": [{"name": "livewire\/livewire", "version": "v3\u002e6.3"}],

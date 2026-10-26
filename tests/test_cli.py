@@ -43,6 +43,19 @@ class CliTests(unittest.TestCase):
         self.assertEqual(result.stdout, f'{self.bad}:2: [PHP-XSS] cross-site scripting: request data reaches echo (CWE-79)\n')
         self.assertEqual(result.stderr, 'phpscan: 1 files, 1 findings, 0 incomplete\n')
 
+    def test_text_source_paths_stay_on_one_line(self):
+        for name, rendered in [('ordinary.php', 'ordinary.php'), ('odd\rname.php', r'odd\rname.php')]:
+            with self.subTest(name=name):
+                path = self.root / name
+                path.write_text("<?php echo $_GET['x'];")
+                result = self.run_cli(path)
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertEqual(result.stderr, 'phpscan: 1 files, 1 findings, 0 incomplete\n')
+                self.assertEqual(len(result.stdout.splitlines()), 1)
+                self.assertEqual(result.stdout,
+                                 f'{self.root}/{rendered}:1: [PHP-XSS] '
+                                 'cross-site scripting: request data reaches echo (CWE-79)\n')
+
     def test_sanitized_source(self):
         result = self.run_cli(self.clean)
         self.assertEqual(result.returncode, 0)
