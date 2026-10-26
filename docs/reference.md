@@ -49,7 +49,15 @@ It also covers CVE-2025-64500 / GHSA-3rg7-wf37-54rm for
 `>=7.0.0,<7.3.7`. The distinct `symfony/symfony` record starts its first
 interval at `2.0.0`; the later intervals are the same. The catalog records the
 maintainer's conflicting unbounded first monolithic interval and prefers the
-reviewed Composer range. It is not a complete Composer advisory database.
+reviewed Composer range.
+The catalog also covers Laravel TokenGuard authentication bypass,
+CVE-2026-114509 / GHSA-f9x3-7vq9-cph6, for exactly `laravel/framework` in
+`<12.68.0` and `>=13.0.0,<13.29.0`. Fixes are `12.68.0` and `13.29.0`.
+The first interval has no lower bound. The reviewed 13.x lower bound takes
+precedence over the maintainer's unbounded `<13.29.0` shorthand so patched
+12.x does not match the 13.x interval. The patch adds string-token checks
+before credential retrieval. This is not a SQL-injection rule or blanket
+Sanctum or Passport advisory. It is not a complete Composer advisory database.
 
 Dependency findings report the installed version, interval, fix boundary,
 lockfile location, and dependency group. Both `packages` and `packages-dev`
@@ -82,6 +90,44 @@ normal taint scan. Scanning a lockfile alone gives version-only evidence. Each s
 records source path, method/check lines, authorization marker line, receiver type,
 and prefix. SARIF keeps `sourceEvidence` and `relatedLocations` separate from
 dependency-version evidence. One dependency match remains one finding.
+
+The bounded Laravel profile reads only the project root's conventional
+`config/auth.php` and `config/database.php`, plus immediate `routes/*.php` files.
+It accepts a single `return [...]` statement in each config file. Array keys
+must be literal strings. The root array, guards, providers, and their entries
+must have unique keys. Unpacking, merged arrays, computed guard or provider
+entries, and malformed brackets do not produce positive evidence.
+Other config values remain uninterpreted, including model class expressions.
+A candidate requires a literal `guards[name]` with `driver => 'token'`,
+`hash => false`, and a literal provider name whose `providers[name]` entry
+has `driver => 'eloquent'`. A custom provider is unresolved.
+
+Routes must be standalone, top-level statements of the exact form
+`Route::middleware('auth:<guard>')->get(<literal URI>, <action>);`.
+The action is not interpreted. The facade must have a simple explicit
+`use Illuminate\Support\Facades\Route;` import, a simple `as` alias, or the
+fully qualified `\Illuminate\Support\Facades\Route` name.
+Namespaces, grouped or conflicting imports, route groups, other HTTP methods,
+additional chain calls, middleware arrays, dynamic middleware, and nested
+route statements are outside this grammar. Strings, comments, and unrelated
+facades do not establish a link. Guard names match case-sensitively.
+
+Only a resolved guard-route link produces `token-guard` and `guard-route`
+observations with status `possible`. A literal database default of `mysql` or
+`mariadb` adds a separate `database-selection` observation with status `possible`.
+A dynamic default, such as `env('DB_CONNECTION')`, or another literal database
+adds a database observation with status `unknown` at the default field's line.
+The guard and route remain possible. Missing fields or malformed optional
+source do not invent locations or remove the dependency match.
+Each observation records `kind`, `sourcePath`, `line`, `status`, and `detail`
+in SARIF `sourceEvidence`, with a related location and a GitHub notice.
+Text reports the same observations. Order follows guard declaration order,
+then sorted route source paths and statement order, followed by the database.
+A suppressed guard field or route prevents the link. A suppressed database
+field removes only that observation. A model's connection override, runtime
+configuration, guard extensions, middleware registration, and exploitability
+remain unknown. The profile never executes PHP or sends application HTTP or
+database requests.
 
 The bounded Symfony profile resolves simple explicit imports and aliases for
 Illuminate or Symfony Request parameter types, and fully qualified types. It

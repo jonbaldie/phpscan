@@ -22,8 +22,10 @@ CI checks the same fixtures under each PHP version.
 `src/scan.bend` tracks taint and builds function summaries.
 `src/version.bend` owns the application version.
 `src/advisories.bend` owns inventory validation and dependency matches.
+`src/evidence.bend` owns shared source inputs, evidence variants, and suppression.
 `src/symfony.bend` owns the pure, bounded Request path-prefix evidence profile.
-Its qualified lexer entrypoint preserves names without changing taint tokens.
+`src/laravel.bend` owns the pure literal-config TokenGuard profile and guard-route links.
+Their qualified lexer entrypoint preserves names without changing taint tokens.
 `src/json.bend` parses lockfile JSON with source lines.
 `src/versions.bend` compares the supported exact SemVer subset.
 `src/catalog.bend` embeds the pinned advisory snapshot and is generated from
@@ -57,6 +59,9 @@ and checks exit status.
 
 For arguments, output formatting, or discovery, add a subprocess assertion in
 `tests/test_cli.py`. For dependency advisories, use `tests/test_advisories.py`.
+`tests/laravel-profile.bend` checks the pure Laravel profile during lint.
+`tests/test_laravel.py` checks the dependency match and configuration evidence
+through the native CLI during `make test`.
 For installation, add a filesystem or installed-binary assertion in
 `tests/test_install.py`.
 

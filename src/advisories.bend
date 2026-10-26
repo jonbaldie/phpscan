@@ -3,10 +3,10 @@ import ./json.bend as J
 import ./versions.bend as V
 import ./catalog.bend as C
 import ./lex.bend as L
-import ./symfony.bend as P
+import ./evidence.bend as E
 
 type Finding is Data:
-  Match{line: U32, advisory: C.Advisory, range: C.AffectedRange, version: String, group: String, sites: List<&2, P.Site>}
+  Match{line: U32, advisory: C.Advisory, range: C.AffectedRange, version: String, group: String, sites: List<&2, E.Site>}
   Unknown{line: U32, reason: String}
 
 def line(f: Finding) -> U32:
@@ -37,17 +37,19 @@ def range_text(lower: Maybe<&2, String>, upper: String) -> String:
     case Some{lo}:
       ">=" ++ lo ++ ",<" ++ upper
 
-def site_text(sites: List<&2, P.Site>) -> String:
+def site_text(sites: List<&2, E.Site>) -> String:
   match sites:
     case Nil{}:
       ""
-    case Con{P.Site{path, method, check, auth, typ, prefix}, rest}:
+    case Con{E.Site{path, method, check, auth, typ, prefix}, rest}:
       "; possible path-prefix access check at " ++ path ++ ":" ++ U32.show(method) ++
       " (check line " ++ U32.show(check) ++ ", authorization marker line " ++ U32.show(auth) ++
       ", receiver " ++ typ ++ ", prefix " ++ prefix ++ ")" ++ site_text(rest)
+    case Con{E.Observation{path, line, kind, status, detail}, rest}:
+      "; " ++ E.kind(kind) ++ " " ++ E.status(status) ++ " at " ++ path ++ ":" ++ U32.show(line) ++ ": " ++ detail ++ site_text(rest)
 
-def code_text(+sites: List<&2, P.Site>) -> String:
-  L.sel(String, List.is_empty(&2, P.Site, sites), u => "; affected-code evidence unknown", u => site_text(sites))
+def code_text(+sites: List<&2, E.Site>) -> String:
+  L.sel(String, E.possible(sites), u => site_text(sites), u => "; affected-code evidence unknown" ++ site_text(sites))
 
 def message(f: Finding) -> String:
   match f:
@@ -164,24 +166,24 @@ def needs_source(fs: List<&2, Finding>) -> Bool:
   match fs:
     case Nil{}:
       False{}
-    case Con{Match{n, C.Advisory{id, cve, profile, ranges, sources, functions}, r, v, g, sites}, rest}:
-      String.eq(profile, "symfony-path-prefix") || needs_source(rest)
+    case Con{Match{n, C.Advisory{id, cve, +profile, ranges, sources, functions}, r, v, g, sites}, rest}:
+      String.eq(profile, "symfony-path-prefix") || String.eq(profile, "laravel-token-guard") || needs_source(rest)
     case Con{f, rest}:
       needs_source(rest)
 
-def enrich(fs: List<&2, Finding>, +e: P.Evidence) -> List<&2, Finding>:
+def enrich(fs: List<&2, Finding>, +e: E.Evidence) -> List<&2, Finding>:
   match fs:
     case Nil{}:
       []
     case Con{Match{+n, +a, +r, +v, +g, old}, rest}:
       C.Advisory{id, cve, +profile, ranges, sources, functions} = a
-      P.Evidence{+sites, +inc} = e
-      found = L.sel(List<&2, Finding>, String.eq(profile, "symfony-path-prefix"),
+      E.Evidence{+sites, +inc} = e
+      found = L.sel(List<&2, Finding>, String.eq(profile, "symfony-path-prefix") || String.eq(profile, "laravel-token-guard"),
         u => L.sel(List<&2, Finding>, inc,
           v0 => [Match{n, a, r, v, g, []}, Unknown{n, "source evidence analysis exhausted its budget"}],
-          v0 => [Match{n, a, r, v, g, sites}]),
+          v0 => [Match{n, a, r, v, g, E.for_profile(sites, profile)}]),
         u => [Match{n, a, r, v, g, []}])
-      List.append(&2, Finding, found, enrich(rest, P.Evidence{sites, inc}))
+      List.append(&2, Finding, found, enrich(rest, E.Evidence{sites, inc}))
     case Con{f, rest}:
       Con{f, enrich(rest, e)}
 

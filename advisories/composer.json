@@ -78,6 +78,35 @@
           "range_provenance": "Reviewed GitHub Composer interval. Matches the maintainer fix boundary."
         }
       ]
+    },
+    {
+      "ghsa": "GHSA-f9x3-7vq9-cph6",
+      "cve": "CVE-2026-114509",
+      "source_profile": "laravel-token-guard",
+      "upstream_updated_at": "2026-10-23T21:50:28Z",
+      "vulnerable_functions": [],
+      "sources": [
+        "https://github.com/advisories/GHSA-f9x3-7vq9-cph6",
+        "https://github.com/laravel/framework/security/advisories/GHSA-f9x3-7vq9-cph6",
+        "https://github.com/laravel/framework/commit/8dbb08bccac1be095dba4a9d259a419620f1e8a5",
+        "https://github.com/laravel/framework/commit/9b21ce0a9bb2b2599978bc0b0df4abea952ad31c"
+      ],
+      "affected_ranges": [
+        {
+          "package": "laravel/framework",
+          "lower_inclusive": null,
+          "upper_exclusive": "12.68.0",
+          "fixed": "12.68.0",
+          "range_provenance": "Reviewed GitHub Composer interval <12.68.0 with no lower bound. Matches the maintainer fix boundary and the patch adding string checks before TokenGuard credential retrieval."
+        },
+        {
+          "package": "laravel/framework",
+          "lower_inclusive": "13.0.0",
+          "upper_exclusive": "13.29.0",
+          "fixed": "13.29.0",
+          "range_provenance": "Reviewed GitHub Composer interval >=13.0.0,<13.29.0. The maintainer's <13.29.0 shorthand omits the 13.x lower bound; prefer the reviewed branch interval so patched 12.x is not matched."
+        }
+      ]
     }
   ]
 }
