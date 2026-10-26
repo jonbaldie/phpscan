@@ -1,3 +1,10 @@
+When using Bend:
+
+- run `bend guide` to learn it
+- use `LAWS.bend` to keep important rules
+- run `bend PROOF.bend` before committing
+- parallelize the code whenever possible
+
 # Work on phpscan
 
 Build phpscan to identify security vulnerabilities and CVEs in source code for
