@@ -12,6 +12,7 @@ import Base
 #   6 CAST   text = the cast type, e.g. "int"
 #   7 BTICK  text = names of variables interpolated into a shell string
 #   8 IGN    a `phpscan-ignore` comment on this line
+#   9 USTR   qualified-only unsupported string; text is empty
 type Tok is Data:
   Tok{kind: U32, text: String, line: U32}
 
@@ -616,14 +617,45 @@ def qualified.ident(w: Cut, +line: U32) -> Step:
     case Cut{rest, l, name, n}:
       Step{rest, line, [tok(1, String.to_lower(name), line)]}
 
+def qualified.string.raw(s: String) -> Bool:
+  match s:
+    case SNil{}:
+      False{}
+    case SCon{'\\', t}:
+      False{}
+    case SCon{'"', t}:
+      True{}
+    case SCon{c, t}:
+      qualified.string.raw(t)
+
+def qualified.string.tokens(ts: List<&2, Tok>) -> List<&2, Tok>:
+  match ts:
+    case Nil{}:
+      []
+    case Con{Tok{2, text, line}, rest}:
+      Con{tok(9, "", line), qualified.string.tokens(rest)}
+    case Con{t, rest}:
+      Con{t, qualified.string.tokens(rest)}
+
+def qualified.string.step(trusted: Bool, st: Step) -> Step:
+  match trusted st:
+    case False{} Step{rest, line, ts}:
+      Step{rest, line, qualified.string.tokens(ts)}
+    case _ st:
+      st
+
 def qualified.step(+s: String, +line: U32) -> Step:
   match s:
     case SNil{}:
+      qualified.string.step(False{}, step(s, line))
+    case SCon{'\'', t}:
       step(s, line)
+    case SCon{'"', t}:
+      qualified.string.step(qualified.string.raw(t), step(s, line))
     case SCon{+c, t}:
       sel(Step, is_id_start(c),
         u => qualified.ident(word(s, True{}, SNil{}), line),
-        u => step(s, line))
+        u => qualified.string.step(False{}, step(s, line)))
 
 def qualified.go(fuel: Nat, st: Step, acc: List<&2, Tok>) -> List<&2, Tok>:
   match fuel st:

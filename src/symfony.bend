@@ -2,11 +2,7 @@ import Base
 import ./lex.bend as L
 import ./tree.bend as T
 
-type Site is Data:
-  Site{path: String, methodLine: U32, checkLine: U32, authorizationLine: U32, receiverType: String, prefix: String}
-
-type Evidence is Data:
-  Evidence{sites: List<&2, Site>, incomplete: Bool}
+import ./evidence.bend as E
 
 type Import is Data:
   Import{alias: String, target: String}
@@ -96,66 +92,41 @@ def authorization(ns: List<&2, T.Node>) -> U32:
     case _:
       0
 
-def condition(ns: List<&2, T.Node>, body: List<&2, T.Node>, ps: List<&2, Import>, path: String, check: U32) -> List<&2, Site>:
+def condition(ns: List<&2, T.Node>, body: List<&2, T.Node>, ps: List<&2, Import>, path: String, check: U32) -> List<&2, E.Site>:
   match ns:
     case Con{T.Leaf{L.Tok{1, "str_starts_with", l}}, Con{T.Grp{40, a, Con{T.Leaf{L.Tok{0, name, v}}, Con{T.Leaf{L.Tok{5, "->", o}}, Con{T.Leaf{L.Tok{1, "getpathinfo", +m}}, Con{T.Grp{40, p, Nil{}}, Con{T.Leaf{L.Tok{5, ",", c}}, Con{T.Leaf{L.Tok{2, +prefix, s}}, Nil{}}}}}}}}, Nil{}}}:
       +typ = receiver(ps, name)
       +auth = authorization(body)
-      L.sel(List<&2, Site>, Bool.not(String.is_empty(typ)) && String.starts_with(prefix, "/") && U32.is_lt(0, auth),
-        u => [Site{path, m, check, auth, typ, prefix}], u => [])
+      L.sel(List<&2, E.Site>, Bool.not(String.is_empty(typ)) && String.starts_with(prefix, "/") && U32.is_lt(0, auth),
+        u => [E.Site{path, m, check, auth, typ, prefix}], u => [])
     case _:
       []
 
-def first_check(ns: List<&2, T.Node>, ps: List<&2, Import>, path: String) -> List<&2, Site>:
+def first_check(ns: List<&2, T.Node>, ps: List<&2, Import>, path: String) -> List<&2, E.Site>:
   match ns:
     case Con{T.Leaf{L.Tok{1, "if", line}}, Con{T.Grp{40, c, cond}, Con{T.Grp{123, b, body}, rest}}}:
       condition(cond, body, ps, path, line)
     case _:
       []
 
-def merge(a: Evidence, b: Evidence) -> Evidence:
-  match a b:
-    case Evidence{xs, i} Evidence{ys, j}:
-      Evidence{List.append(&2, Site, xs, ys), i || j}
-
-def functions(fuel: Nat, ns: List<&2, T.Node>, +im: List<&2, Import>, +path: String) -> Evidence:
+def functions(fuel: Nat, ns: List<&2, T.Node>, +im: List<&2, Import>, +path: String) -> E.Evidence:
   match fuel ns:
     case 0n _:
-      Evidence{[], True{}}
+      E.Evidence{[], True{}}
     case 1n+p Nil{}:
-      Evidence{[], False{}}
+      E.Evidence{[], False{}}
     case 1n+(+p) Con{T.Leaf{L.Tok{1, "function", f}}, Con{T.Leaf{L.Tok{1, name, n}}, Con{T.Grp{40, a, params}, Con{T.Grp{123, b, body}, rest}}}}:
-      merge(Evidence{first_check(body, parameter(params, im, True{}), path), False{}}, functions(p, rest, im, path))
+      E.merge(E.Evidence{first_check(body, parameter(params, im, True{}), path), False{}}, functions(p, rest, im, path))
     case 1n+(+p) Con{T.Grp{k, l, kids}, rest}:
-      merge(functions(p, kids, im, path), functions(p, rest, im, path))
+      E.merge(functions(p, kids, im, path), functions(p, rest, im, path))
     case 1n+p Con{n, rest}:
       functions(p, rest, im, path)
 
-def analyze(+ns: List<&2, T.Node>, path: String, fuel: Nat) -> Evidence:
-  L.sel(Evidence, simple_scope(ns, False{}), u => functions(fuel, ns, imports(ns), path), u => Evidence{[], False{}})
+def analyze(+ns: List<&2, T.Node>, path: String, fuel: Nat) -> E.Evidence:
+  L.sel(E.Evidence, simple_scope(ns, False{}), u => functions(fuel, ns, imports(ns), path), u => E.Evidence{[], False{}})
 
-def ignored(xs: List<&2, U32>, +line: U32) -> Bool:
-  match xs:
-    case Nil{}:
-      False{}
-    case Con{x, rest}:
-      U32.is_eq(x, line) || ignored(rest, line)
-
-def visible(sites: List<&2, Site>, +lines: List<&2, U32>) -> List<&2, Site>:
-  match sites:
-    case Nil{}:
-      []
-    case Con{+site, +rest}:
-      Site{p, method, c, a, t, s} = site
-      L.sel(List<&2, Site>, ignored(lines, method), u => visible(rest, lines), u => Con{site, visible(rest, lines)})
-
-def suppress(e: Evidence, lines: List<&2, U32>) -> Evidence:
-  match e:
-    case Evidence{sites, inc}:
-      Evidence{visible(sites, lines), inc}
-
-def scan(path: String, source: String) -> Evidence:
+def scan(path: String, source: String) -> E.Evidence:
   +tokens = L.qualified(source)
-  L.sel(Evidence, T.balanced(tokens, []),
-    u => suppress(analyze(T.tree(L.without_ignores(tokens)), path, 1n+List.length(&2, L.Tok, tokens)), L.ignored_lines(tokens, 0)),
-    u => Evidence{[], False{}})
+  L.sel(E.Evidence, T.balanced(tokens, []),
+    u => E.suppress(analyze(T.tree(L.without_ignores(tokens)), path, 1n+List.length(&2, L.Tok, tokens)), L.ignored_lines(tokens, 0)),
+    u => E.Evidence{[], False{}})

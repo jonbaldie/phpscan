@@ -5,6 +5,8 @@ import ./version.bend as V
 import ./advisories.bend as A
 import ./catalog.bend as C
 import ./symfony.bend as P
+import ./evidence.bend as E
+import ./laravel.bend as G
 
 # phpscan: taint-tracking vulnerability scanner for PHP sources, for CI.
 #
@@ -12,9 +14,6 @@ import ./symfony.bend as P
 #
 # Directories are searched for *.php, *.phtml and *.inc files. Exit status:
 # 0 no findings, 1 findings, 2 usage or I/O error or an incomplete analysis.
-
-type Src is Data:
-  Src{path: String, text: String}
 
 type Rep is Data:
   Rep{path: String, fs: List<&2, S.Finding>}
@@ -185,28 +184,34 @@ def json.strings(xs: List<&2, String>) -> List<&2, String>:
     case Con{x, rest}:
       Con{json.str(x), json.strings(rest)}
 
-def source.props(sites: List<&2, P.Site>) -> List<&2, String>:
+def source.props(sites: List<&2, E.Site>) -> List<&2, String>:
   match sites:
     case Nil{}:
       []
-    case Con{P.Site{path, method, check, auth, typ, prefix}, rest}:
+    case Con{E.Site{path, method, check, auth, typ, prefix}, rest}:
       Con{"{\"kind\":\"possible path-prefix access check\",\"sourcePath\":" ++ json.str(path) ++
         ",\"methodLine\":" ++ U32.show(method) ++ ",\"checkLine\":" ++ U32.show(check) ++
         ",\"authorizationLine\":" ++ U32.show(auth) ++ ",\"receiverType\":" ++ json.str(typ) ++
         ",\"prefix\":" ++ json.str(prefix) ++ "}", source.props(rest)}
+    case Con{E.Observation{path, line, kind, status, detail}, rest}:
+      Con{"{\"kind\":" ++ json.str(E.kind(kind)) ++ ",\"sourcePath\":" ++ json.str(path) ++
+        ",\"line\":" ++ U32.show(line) ++ ",\"status\":" ++ json.str(E.status(status)) ++
+        ",\"detail\":" ++ json.str(detail) ++ "}", source.props(rest)}
 
 def source.location(+path: String, line: U32, label: String) -> String:
   "{\"message\":{\"text\":" ++ json.str(label) ++ "},\"physicalLocation\":{\"artifactLocation\":{\"uri\":" ++ json.str(path) ++
   "},\"region\":{\"startLine\":" ++ U32.show(line) ++ "}}}"
 
-def source.locations(sites: List<&2, P.Site>) -> List<&2, String>:
+def source.locations(sites: List<&2, E.Site>) -> List<&2, String>:
   match sites:
     case Nil{}:
       []
-    case Con{P.Site{+path, method, check, auth, typ, prefix}, rest}:
+    case Con{E.Site{+path, method, check, auth, typ, prefix}, rest}:
       Con{source.location(path, method, "possible getPathInfo call"),
         Con{source.location(path, check, "possible path-prefix access check"),
           Con{source.location(path, auth, "authorization marker"), source.locations(rest)}}}
+    case Con{E.Observation{path, line, kind, status, detail}, rest}:
+      Con{source.location(path, line, E.kind(kind) ++ " " ++ E.status(status) ++ ": " ++ detail), source.locations(rest)}
 
 def advisory.related(f: A.Finding) -> String:
   match f:
@@ -221,7 +226,7 @@ def advisory.props(f: A.Finding) -> String:
       "{\"evidenceKind\":\"dependency-version\",\"ghsa\":" ++ json.str(id) ++ ",\"cve\":" ++ json.str(cve) ++
       ",\"package\":" ++ json.str(package) ++ ",\"installedVersion\":" ++ json.str(version) ++
       ",\"dependencyGroup\":" ++ json.str(group) ++ ",\"affectedRange\":" ++ json.str(A.range_text(lower, upper)) ++
-      ",\"fixedVersion\":" ++ json.str(fixed) ++ ",\"affectedCode\":" ++ json.str(L.sel(String, List.is_empty(&2, P.Site, sites), u => "unknown", u => "possible")) ++
+      ",\"fixedVersion\":" ++ json.str(fixed) ++ ",\"affectedCode\":" ++ json.str(L.sel(String, E.possible(sites), u => "possible", u => "unknown")) ++
       ",\"sourceEvidence\":[" ++ String.join(source.props(sites), ",") ++
       "],\"runtimeExposure\":\"unknown\",\"exploitability\":\"unknown\",\"deployment\":\"unknown\",\"middlewareRegistration\":\"unknown\",\"serverConfiguration\":\"unknown\",\"independentAuthorization\":\"unknown\",\"vulnerableFunctions\":[" ++
       String.join(json.strings(functions), ",") ++ "],\"sources\":[" ++ String.join(json.strings(sources), ",") ++
@@ -229,13 +234,17 @@ def advisory.props(f: A.Finding) -> String:
     case A.Unknown{n, reason}:
       "{\"evidenceKind\":\"unknown\"}"
 
-def source.notices(sites: List<&2, P.Site>, +id: String, +cve: String) -> String:
+def source.notices(sites: List<&2, E.Site>, +id: String, +cve: String) -> String:
   match sites:
     case Nil{}:
       ""
-    case Con{P.Site{path, method, check, auth, typ, prefix}, rest}:
+    case Con{E.Site{path, method, check, auth, typ, prefix}, rest}:
       "::notice file=" ++ gh.escape(path) ++ ",line=" ++ U32.show(method) ++ ",title=phpscan " ++ id ++
       "::" ++ cve ++ " / " ++ id ++ "; possible path-prefix access check; runtime exposure unknown; exploitability unknown\n" ++ source.notices(rest, id, cve)
+    case Con{E.Observation{path, line, kind, status, detail}, rest}:
+      "::notice file=" ++ gh.escape(path) ++ ",line=" ++ U32.show(line) ++ ",title=phpscan " ++ id ++ "::" ++
+      gh.escape(cve ++ " / " ++ id ++ "; " ++ E.kind(kind) ++ " " ++ E.status(status) ++ "; " ++ detail ++
+        "; runtime exposure unknown; exploitability unknown") ++ "\n" ++ source.notices(rest, id, cve)
 
 def advisory.notices(f: A.Finding) -> String:
   match f:
@@ -334,13 +343,13 @@ def summary(nfiles: U32, +n: U32, +inc: U32) -> String:
 
 # ---------------------------------------------------------------- scanning
 
-def scan1(x: Src) -> Rep:
+def scan1(x: E.Src) -> Rep:
   match x:
-    case Src{+p, +t}:
+    case E.Src{+p, +t}:
       L.sel(Rep, String.eq(p, "composer.lock") || String.ends_with(p, "/composer.lock"),
         u => Inventory{p, A.scan(t)}, u => Rep{p, S.scan(t)})
 
-def scan_seq(xs: List<&2, Src>) -> List<&2, Rep>:
+def scan_seq(xs: List<&2, E.Src>) -> List<&2, Rep>:
   match xs:
     case Nil{}:
       []
@@ -349,7 +358,7 @@ def scan_seq(xs: List<&2, Src>) -> List<&2, Rep>:
 
 # Files are independent: scan them in parallel, splitting the list in halves
 # so the two sides of each fork carry similar work.
-def scan_all(n: Nat, xs: List<&2, Src>) -> List<&2, Rep>:
+def scan_all(n: Nat, xs: List<&2, E.Src>) -> List<&2, Rep>:
   match n xs:
     case n0 Nil{}:
       []
@@ -358,9 +367,9 @@ def scan_all(n: Nat, xs: List<&2, Src>) -> List<&2, Rep>:
     case 1n+p Con{x, Nil{}}:
       [scan1(x)]
     case 1n+(+p) Con{x, Con{y, rest}}:
-      +ys = {Con{x, Con{y, rest}} : List<&2, Src>}
-      +h = Nat.div(List.length(&2, Src, ys), 2n)
-      a b = scan_all(p, List.take(&2, Src, ys, h)) scan_all(p, List.drop(&2, Src, ys, h))
+      +ys = {Con{x, Con{y, rest}} : List<&2, E.Src>}
+      +h = Nat.div(List.length(&2, E.Src, ys), 2n)
+      a b = scan_all(p, List.take(&2, E.Src, ys, h)) scan_all(p, List.drop(&2, E.Src, ys, h))
       List.append(&2, Rep, a, b)
 
 def project.excluded(markers: List<&2, String>, +path: String) -> Bool:
@@ -380,15 +389,26 @@ def project.needs_source(rs: List<&2, Rep>) -> Bool:
     case Con{r, rest}:
       project.needs_source(rest)
 
-def project.evidence(xs: List<&2, Src>, +markers: List<&2, String>) -> P.Evidence:
+def project.sources(xs: List<&2, E.Src>, +markers: List<&2, String>) -> List<&2, E.Src>:
   match xs:
     case Nil{}:
-      P.Evidence{[], False{}}
-    case Con{Src{+p, t}, rest}:
-      P.merge(L.sel(P.Evidence, String.eq(p, "composer.lock") || String.ends_with(p, "/composer.lock") || project.excluded(markers, p),
-        u => P.Evidence{[], False{}}, u => P.scan(p, t)), project.evidence(rest, markers))
+      []
+    case Con{E.Src{+p, t}, +rest}:
+      L.sel(List<&2, E.Src>, String.eq(p, "composer.lock") || String.ends_with(p, "/composer.lock") || project.excluded(markers, p),
+        u => project.sources(rest, markers), u => Con{E.Src{p, t}, project.sources(rest, markers)})
 
-def project.enrich(rs: List<&2, Rep>, +e: P.Evidence) -> List<&2, Rep>:
+def project.symfony(xs: List<&2, E.Src>) -> E.Evidence:
+  match xs:
+    case Nil{}:
+      E.Evidence{[], False{}}
+    case Con{E.Src{p, t}, rest}:
+      E.merge(P.scan(p, t), project.symfony(rest))
+
+def project.evidence(+root: String, +xs: List<&2, E.Src>) -> E.Evidence:
+  a b = project.symfony(xs) G.analyze(root, xs)
+  E.merge(a, b)
+
+def project.enrich(rs: List<&2, Rep>, +e: E.Evidence) -> List<&2, Rep>:
   match rs:
     case Nil{}:
       []
@@ -440,29 +460,29 @@ def list_boundaries(+p: String) -> IO(List<&2, String>):
       Process.run("find", [safe_path(p), "-mindepth", "2", "-type", "f", "(", "-name", "composer.json", "-o", "-name", "composer.lock", ")"], "", 268435456, 120000)
     found(p, r)
 
-def got(+p: String, r: Result<&1, &1, U32 & String, U32 & (String & String)>) -> IO(Src):
+def got(+p: String, r: Result<&1, &1, U32 & String, U32 & (String & String)>) -> IO(E.Src):
   match r:
     case Fail{(code, m)}:
-      IO.die(Src, 2, "phpscan: cannot read " ++ p ++ ": " ++ m)
+      IO.die(E.Src, 2, "phpscan: cannot read " ++ p ++ ": " ++ m)
     case Done{(st, (out, err))}:
-      L.sel(IO(Src), U32.is_eq(st, 0),
-        u => IO.pure(Src, Src{p, out}),
-        u => IO.die(Src, 2, "phpscan: cannot read " ++ p ++ ": " ++ String.trim_end(err)))
+      L.sel(IO(E.Src), U32.is_eq(st, 0),
+        u => IO.pure(E.Src, E.Src{p, out}),
+        u => IO.die(E.Src, 2, "phpscan: cannot read " ++ p ++ ": " ++ String.trim_end(err)))
 
-def read_one(+p: String) -> IO(Src):
-  do IO<Src>:
+def read_one(+p: String) -> IO(E.Src):
+  do IO<E.Src>:
     r : Result<&1, &1, U32 & String, U32 & (String & String)> <-
       Process.run("cat", ["--", p], "", 67108864, 60000)
     got(p, r)
 
-def read_all(ps: List<&2, String>) -> IO(List<&2, Src>):
+def read_all(ps: List<&2, String>) -> IO(List<&2, E.Src>):
   match ps:
     case Nil{}:
-      IO.pure(List<&2, Src>, [])
+      IO.pure(List<&2, E.Src>, [])
     case Con{+p, rest}:
-      do IO<List<&2, Src>>:
-        a : Src <- read_one(p)
-        b : List<&2, Src> <- read_all(rest)
+      do IO<List<&2, E.Src>>:
+        a : E.Src <- read_one(p)
+        b : List<&2, E.Src> <- read_all(rest)
         return Con{a, b}
 
 def str.le(a: String, b: String) -> Bool:
@@ -475,11 +495,11 @@ def projects(ps: List<&2, String>) -> IO(List<&2, Rep>):
     case Con{+p, rest}:
       do IO<List<&2, Rep>>:
         files : List<&2, String> <- list_one(p)
-        +srcs : List<&2, Src> <- read_all(List.sort(~String, ~str.le, files))
+        +srcs : List<&2, E.Src> <- read_all(List.sort(~String, ~str.le, files))
         +rs : List<&2, Rep> = scan_all(64n, srcs)
         +active : Bool = project.needs_source(rs)
         markers : List<&2, String> <- L.sel(IO(List<&2, String>), active, u => list_boundaries(p), u => IO.pure(List<&2, String>, []))
-        a : List<&2, Rep> = L.sel(List<&2, Rep>, active, u => project.enrich(rs, project.evidence(srcs, markers)), u => rs)
+        a : List<&2, Rep> = L.sel(List<&2, Rep>, active, u => project.enrich(rs, project.evidence(p, project.sources(srcs, markers))), u => rs)
         b : List<&2, Rep> <- projects(rest)
         return List.append(&2, Rep, a, b)
 
