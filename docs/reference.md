@@ -116,11 +116,20 @@ are not argument separators. The action is not interpreted.
 Extra top-level arguments, named arguments, and unpacked arguments leave the
 link unknown. The facade must have a simple explicit
 `use Illuminate\Support\Facades\Route;` import, a simple `as` alias, or the
-fully qualified `\Illuminate\Support\Facades\Route` name.
-Namespaces, grouped or conflicting imports, route groups, other HTTP methods,
-additional chain calls, middleware arrays, dynamic middleware, and nested
-route statements are outside this grammar. Strings, comments, and unrelated
-facades do not establish a link. Guard names match case-sensitively.
+fully qualified `\Illuminate\Support\Facades\Route` name. Imports apply only
+to later statements, including statements on the same line. Fully qualified
+calls require no import. Namespaces and complex or duplicate imports leave
+route evidence unknown for the whole file, including earlier routes.
+A root-level identifier token `endif`, `endwhile`, `endfor`, `endforeach`,
+`endswitch`, `enddeclare`, or `__halt_compiler`, in any letter case, also leaves
+route evidence unknown for the whole file. This conservatively excludes
+colon-style blocks and compiler-halt raw data without interpreting PHP control
+flow. The check does not inspect grouped nodes, strings, or comments.
+Action groups remain opaque, including keyword-looking method names.
+Route groups, other HTTP methods, additional chain calls, middleware arrays,
+dynamic middleware, and nested route statements are outside this grammar.
+Strings, comments, and unrelated facades do not establish a link.
+Guard names match case-sensitively. The profile does not validate PHP syntax.
 
 Only a resolved guard-route link produces `token-guard` and `guard-route`
 observations with status `possible`. Database observations require a valid link

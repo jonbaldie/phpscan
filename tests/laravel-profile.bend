@@ -68,10 +68,55 @@ def argument_tokens(unpacked: List<&2, L.Tok>, named: List<&2, L.Tok>) -> Bool:
     case _ _:
       False{}
 
+def context_unknown(+a: String, opening: String, ending: String) -> Bool:
+  empty(profile(a, "'mysql'", "<?php use Illuminate\\Support\\Facades\\Route; " ++ opening ++
+    " $unused = 1; Route::middleware('auth:api')->get('/x', fn () => 1); " ++ ending ++ ";"))
+
+def route_contexts(+a: String) -> Bool:
+  context_unknown(a, "if (false):", "endif") &&
+    context_unknown(a, "while (false):", "endwhile") &&
+    context_unknown(a, "for (; false;):", "endfor") &&
+    context_unknown(a, "foreach ([] as $item):", "endforeach") &&
+    context_unknown(a, "switch (1): case 1:", "endswitch") &&
+    context_unknown(a, "declare(ticks=1):", "enddeclare") &&
+    context_unknown(a, "IF (false):", "ENDIF") &&
+    context_unknown(a, "WHILE (false):", "ENDWHILE") &&
+    context_unknown(a, "FOR (; false;):", "ENDFOR") &&
+    context_unknown(a, "FOREACH ([] as $item):", "ENDFOREACH") &&
+    context_unknown(a, "SWITCH (1): case 1:", "ENDSWITCH") &&
+    context_unknown(a, "DECLARE(ticks=1):", "ENDDECLARE") &&
+    empty(profile(a, "'mysql'", "<?php use Illuminate\\Support\\Facades\\Route; __halt_compiler(); Route::middleware('auth:api')->get('/x', fn () => 1);")) &&
+    empty(profile(a, "'mysql'", "<?php use Illuminate\\Support\\Facades\\Route; __HALT_COMPILER(); Route::middleware('auth:api')->get('/x', fn () => 1);")) &&
+    empty(profile(a, "'mysql'", "<?php use Illuminate\\Support\\Facades\\Route; __HaLt_CoMpIlEr(); Route::middleware('auth:api')->get('/x', fn () => 1);")) &&
+    empty(profile(a, "'mysql'", route() ++ "__halt_compiler(); raw data")) &&
+    empty(profile(a, "'mysql'", route() ++ "if (false): $unused = 1; endif;")) &&
+    observed(profile(a, "'mysql'", "<?php\nuse Illuminate\\Support\\Facades\\Route; $unused = false;\nRoute::middleware('auth:api')->get('/x', fn () => 1);"), "possible") &&
+    observed(profile(a, "'mysql'", "<?php\nuse Illuminate\\Support\\Facades\\Route; $text = 'endif endwhile endfor endforeach endswitch enddeclare __halt_compiler';\nRoute::middleware('auth:api')->get('/x', fn () => 1);"), "possible") &&
+    observed(profile(a, "'mysql'", "<?php\nuse Illuminate\\Support\\Facades\\Route; $text = \"ENDIF ENDWHILE ENDFOR ENDFOREACH ENDSWITCH ENDDECLARE __HALT_COMPILER\";\nRoute::middleware('auth:api')->get('/x', fn () => 1);"), "possible") &&
+    observed(profile(a, "'mysql'", "<?php\nuse Illuminate\\Support\\Facades\\Route; /* endif endwhile endfor endforeach endswitch enddeclare __halt_compiler */ // ENDIF __HALT_COMPILER\nRoute::middleware('auth:api')->get('/x', fn () => 1);"), "possible") &&
+    observed(profile(a, "'mysql'", "<?php\nuse Illuminate\\Support\\Facades\\Route;\nRoute::middleware('auth:api')->get('/x', function () { if (false): endif; while (false): endwhile; for (; false;): endfor; foreach ([] as $item): endforeach; switch (1): case 1: break; endswitch; declare(ticks=1): enddeclare; return ['__halt_compiler', 'ENDIF']; });"), "possible") &&
+    observed(profile(a, "'mysql'", "<?php\nuse Illuminate\\Support\\Facades\\Route;\nRoute::middleware('auth:api')->get('/x', $handler->endif()->endwhile()->endfor()->endforeach()->endswitch()->enddeclare()->__halt_compiler());"), "possible")
+
+def ordered_imports(+a: String) -> Bool:
+  empty(profile(a, "'mysql'", "<?php\nRoute::middleware('auth:api')->get('/x', fn () => 1);\nuse Illuminate\\Support\\Facades\\Route;")) &&
+    empty(profile(a, "'mysql'", "<?php Route::middleware('auth:api')->get('/x', fn () => 1); use Illuminate\\Support\\Facades\\Route;")) &&
+    empty(profile(a, "'mysql'", "<?php\nR::middleware('auth:api')->get('/x', fn () => 1);\nuse Illuminate\\Support\\Facades\\Route as R;")) &&
+    empty(profile(a, "'mysql'", "<?php R::middleware('auth:api')->get('/x', fn () => 1); use Illuminate\\Support\\Facades\\Route as R;")) &&
+    observed(profile(a, "'mysql'", "<?php R::middleware('auth:api')->get('/before', fn () => 1);\nuse Illuminate\\Support\\Facades\\Route as R;\nR::middleware('auth:api')->get('/after', fn () => 1);"), "possible") &&
+    observed(profile(a, "'mysql'", "<?php\n\nR::middleware('auth:api')->get('/before', fn () => 1); use Illuminate\\Support\\Facades\\Route as R; R::middleware('auth:api')->get('/after', fn () => 1);"), "possible") &&
+    observed(profile(a, "'mysql'", "<?php\n\nuse Illuminate\\Support\\Facades\\Route as R; R::middleware('auth:api')->get('/x', fn () => 1);"), "possible") &&
+    observed(profile(a, "'mysql'", "<?php\n\n\\Illuminate\\Support\\Facades\\Route::middleware('auth:api')->get('/x', fn () => 1); use Other\\Route;"), "possible") &&
+    empty(profile(a, "'mysql'", route() ++ "use Illuminate\\Support\\Facades\\Route;")) &&
+    empty(profile(a, "'mysql'", route() ++ "use Other\\Route;")) &&
+    empty(profile(a, "'mysql'", route() ++ "use Other\\{One, Two};")) &&
+    empty(profile(a, "'mysql'", route() ++ "use Other\\One, Other\\Two;")) &&
+    empty(profile(a, "'mysql'", route() ++ "namespace Other;"))
+
 def main() -> U32:
   +a = auth("'token'", "'eloquent'", "false")
   +r = route()
-  ok = observed(profile(a, "'mysql'", r), "possible") &&
+  ok = route_contexts(a) && ordered_imports(a) &&
+    observed(profile(a, "'mysql'", r), "possible") &&
     observed(profile(a, "'mariadb'", r), "possible") &&
     argument_tokens(L.qualified("<?php ...$actions"), L.qualified("<?php action: $handler")) &&
     observed(profile(a, "'mysql'", "<?php\nuse Illuminate\\Support\\Facades\\Route;\nRoute::middleware('auth:api')->get('/x', [Controller::class, 'show']);"), "possible") &&

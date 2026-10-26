@@ -14,6 +14,9 @@ The scan exits 0 when clean, 1 for findings, and 2 for an error or reported
 incomplete analysis. Let your CI service keep that status. Use a version tag,
 not `latest`, for repeatable jobs.
 
+In GitHub Actions, use the SARIF or GitHub format shown below. Text output can
+contain raw source text and is not a workflow-command encoding.
+
 ## Upload SARIF in GitHub Actions
 
 This example preserves scan failure and uploads the report when one exists.

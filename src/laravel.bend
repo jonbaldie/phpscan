@@ -163,6 +163,17 @@ def guards(c: Maybe<&2, Config>) -> List<&2, Guard>:
         return L.sel(List<&2, Guard>, valid_entries(gs) && valid_entries(ps), u => candidates(gs, ps, path, ignores), u => [])
       Maybe.default(&2, List<&2, Guard>, parsed, [])
 
+def unsupported_context(ns: List<&2, T.Node>) -> Bool:
+  match ns:
+    case Nil{}:
+      False{}
+    case Con{T.Leaf{L.Tok{1, +name, l}}, rest}:
+      String.eq(name, "endif") || String.eq(name, "endwhile") || String.eq(name, "endfor") ||
+        String.eq(name, "endforeach") || String.eq(name, "endswitch") || String.eq(name, "enddeclare") ||
+        String.eq(name, "__halt_compiler") || unsupported_context(rest)
+    case Con{n, rest}:
+      unsupported_context(rest)
+
 def statements(ns: List<&2, T.Node>, current: List<&2, T.Node>, acc: List<&2, List<&2, T.Node>>) -> Maybe<&2, List<&2, List<&2, T.Node>>>:
   match ns current:
     case Nil{} Nil{}:
@@ -180,22 +191,6 @@ def has_alias(xs: List<&2, Alias>, +name: String) -> Bool:
       False{}
     case Con{Alias{n, t}, rest}:
       String.eq(n, name) || has_alias(rest, name)
-
-def aliases(ss: List<&2, List<&2, T.Node>>, +acc: List<&2, Alias>) -> Maybe<&2, List<&2, Alias>>:
-  match ss:
-    case Nil{}:
-      Some{acc}
-    case Con{Con{T.Leaf{L.Tok{1, "use", u}}, Con{T.Leaf{L.Tok{1, +target, t}}, Nil{}}}, rest}:
-      +name = L.strip_ns(target)
-      L.sel(Maybe<&2, List<&2, Alias>>, has_alias(acc, name), v => None{}, v => aliases(rest, Con{Alias{name, target}, acc}))
-    case Con{Con{T.Leaf{L.Tok{1, "use", u}}, Con{T.Leaf{L.Tok{1, target, t}}, Con{T.Leaf{L.Tok{1, "as", a}}, Con{T.Leaf{L.Tok{1, +name, n}}, Nil{}}}}}, rest}:
-      L.sel(Maybe<&2, List<&2, Alias>>, has_alias(acc, name), v => None{}, v => aliases(rest, Con{Alias{name, target}, acc}))
-    case Con{Con{T.Leaf{L.Tok{1, "use", l}}, ns}, rest}:
-      None{}
-    case Con{Con{T.Leaf{L.Tok{1, "namespace", l}}, ns}, rest}:
-      None{}
-    case Con{ns, rest}:
-      aliases(rest, acc)
 
 def facade_target(+s: String) -> Bool:
   String.eq(s, "illuminate\\support\\facades\\route") || String.eq(s, "\\illuminate\\support\\facades\\route")
@@ -247,19 +242,34 @@ def route(ns: List<&2, T.Node>, im: List<&2, Alias>, path: String, ignores: List
     case _:
       []
 
-def routes(ss: List<&2, List<&2, T.Node>>, +im: List<&2, Alias>, +path: String, +ignores: List<&2, U32>) -> List<&2, Route>:
+def route_statements(ss: List<&2, List<&2, T.Node>>, +im: List<&2, Alias>, +path: String, +ignores: List<&2, U32>) -> Maybe<&2, List<&2, Route>>:
   match ss:
     case Nil{}:
-      []
+      Some{[]}
+    case Con{Con{T.Leaf{L.Tok{1, "use", u}}, Con{T.Leaf{L.Tok{1, +target, t}}, Nil{}}}, rest}:
+      +name = L.strip_ns(target)
+      L.sel(Maybe<&2, List<&2, Route>>, has_alias(im, name), v => None{},
+        v => route_statements(rest, Con{Alias{name, target}, im}, path, ignores))
+    case Con{Con{T.Leaf{L.Tok{1, "use", u}}, Con{T.Leaf{L.Tok{1, target, t}}, Con{T.Leaf{L.Tok{1, "as", a}}, Con{T.Leaf{L.Tok{1, +name, n}}, Nil{}}}}}, rest}:
+      L.sel(Maybe<&2, List<&2, Route>>, has_alias(im, name), v => None{},
+        v => route_statements(rest, Con{Alias{name, target}, im}, path, ignores))
+    case Con{Con{T.Leaf{L.Tok{1, "use", l}}, ns}, rest}:
+      None{}
+    case Con{Con{T.Leaf{L.Tok{1, "namespace", l}}, ns}, rest}:
+      None{}
     case Con{ns, rest}:
-      List.append(&2, Route, route(ns, im, path, ignores), routes(rest, im, path, ignores))
+      do Maybe<&2, List<&2, Route>>:
+        rs : List<&2, Route> <- route_statements(rest, im, path, ignores)
+        return List.append(&2, Route, route(ns, im, path, ignores), rs)
 
 def route_file(path: String, +ts: List<&2, L.Tok>) -> List<&2, Route>:
   parsed = do Maybe<&2, List<&2, Route>>:
-    +ss : List<&2, List<&2, T.Node>> <- L.sel(Maybe<&2, List<&2, List<&2, T.Node>>>, T.balanced(ts, []),
-      u => statements(T.tree(L.without_ignores(ts)), [], []), u => None{})
-    im : List<&2, Alias> <- aliases(ss, [])
-    return routes(ss, im, path, L.ignored_lines(ts, 0))
+    +ns : List<&2, T.Node> <- L.sel(Maybe<&2, List<&2, T.Node>>, T.balanced(ts, []),
+      u => Some{T.tree(L.without_ignores(ts))}, u => None{})
+    ss : List<&2, List<&2, T.Node>> <- L.sel(Maybe<&2, List<&2, List<&2, T.Node>>>, unsupported_context(ns),
+      u => None{}, u => statements(ns, [], []))
+    rs : List<&2, Route> <- route_statements(ss, [], path, L.ignored_lines(ts, 0))
+    return rs
   Maybe.default(&2, List<&2, Route>, parsed, [])
 
 def join(+root: String, +relative: String) -> String:
