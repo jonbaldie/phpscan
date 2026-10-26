@@ -1,12 +1,16 @@
 import Base
 
+type AffectedRange is Data:
+  AffectedRange{package: String, lower: Maybe<&2, String>, upper: String, fixed: String, provenance: String}
+
 type Advisory is Data:
-  Advisory{ghsa: String, cve: String, package: String, lower: String, upper: String, fixed: String, provenance: String, sources: List<&2, String>, functions: List<&2, String>}
+  Advisory{ghsa: String, cve: String, profile: String, ranges: List<&2, AffectedRange>, sources: List<&2, String>, functions: List<&2, String>}
 
 def snapshot_date() -> String:
   "2026-10-26"
 
 def records() -> List<&2, Advisory>:
   [
-    Advisory{"GHSA-29cq-5w36-x7w3", "CVE-2025-54068", "livewire/livewire", "3.0.0-beta.1", "3.6.4", "3.6.4", "Reviewed Composer range >=3.0.0-beta.1,<3.6.4. The maintainer structured range says <3.6.3, but its prose includes 3.6.3 and identifies 3.6.4 as the fix. The reviewed record and patch boundary take precedence.", ["https://github.com/advisories/GHSA-29cq-5w36-x7w3", "https://github.com/livewire/livewire/security/advisories/GHSA-29cq-5w36-x7w3", "https://github.com/livewire/livewire/commit/ef04be759da41b14d2d129e670533180a44987dc"], []}
+    Advisory{"GHSA-29cq-5w36-x7w3", "CVE-2025-54068", "none", [AffectedRange{"livewire/livewire", Some{"3.0.0-beta.1"}, "3.6.4", "3.6.4", "Reviewed Composer range >=3.0.0-beta.1,<3.6.4. The maintainer structured range says <3.6.3, but its prose includes 3.6.3 and identifies 3.6.4 as the fix. The reviewed record and patch boundary take precedence."}], ["https://github.com/advisories/GHSA-29cq-5w36-x7w3", "https://github.com/livewire/livewire/security/advisories/GHSA-29cq-5w36-x7w3", "https://github.com/livewire/livewire/commit/ef04be759da41b14d2d129e670533180a44987dc"], []},
+    Advisory{"GHSA-3rg7-wf37-54rm", "CVE-2025-64500", "symfony-path-prefix", [AffectedRange{"symfony/http-foundation", None{}, "5.4.50", "5.4.50", "Reviewed GitHub Composer interval. Matches the maintainer fix boundary."}, AffectedRange{"symfony/http-foundation", Some{"6.0.0"}, "6.4.29", "6.4.29", "Reviewed GitHub Composer interval. Matches the maintainer fix boundary."}, AffectedRange{"symfony/http-foundation", Some{"7.0.0"}, "7.3.7", "7.3.7", "Reviewed GitHub Composer interval. Matches the maintainer fix boundary."}, AffectedRange{"symfony/symfony", Some{"2.0.0"}, "5.4.50", "5.4.50", "Reviewed GitHub Composer interval. The maintainer gives an unbounded first symfony/symfony interval; prefer the reviewed >=2.0.0 lower bound."}, AffectedRange{"symfony/symfony", Some{"6.0.0"}, "6.4.29", "6.4.29", "Reviewed GitHub Composer interval. Matches the maintainer fix boundary."}, AffectedRange{"symfony/symfony", Some{"7.0.0"}, "7.3.7", "7.3.7", "Reviewed GitHub Composer interval. Matches the maintainer fix boundary."}], ["https://github.com/advisories/GHSA-3rg7-wf37-54rm", "https://github.com/symfony/symfony/security/advisories/GHSA-3rg7-wf37-54rm", "https://github.com/symfony/symfony/commit/9962b91b12bb791322fa73836b350836b6db7cac", "https://github.com/laravel/framework/blob/v12.67.0/src/Illuminate/Http/Request.php"], []}
   ]

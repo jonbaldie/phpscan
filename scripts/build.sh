@@ -7,6 +7,7 @@ case "$stage" in all|generate|compile) ;; *) echo 'Usage: scripts/build.sh [gene
 mkdir -p dist
 if [[ $stage != compile ]]; then
   python3 scripts/catalog.py --check
+  scripts/bend.sh tests/catalog-check.bend | grep -qx 0
   scripts/bend.sh PROOF.bend | tee dist/proof.txt
   grep -q '^ALL PROOFS CHECK$' dist/proof.txt
   scripts/bend.sh tests/status.bend | tee dist/status.txt

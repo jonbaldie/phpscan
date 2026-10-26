@@ -10,7 +10,8 @@ When using Bend:
 Build phpscan to identify security vulnerabilities and CVEs in source code for
 public, internet-facing PHP applications. The current Bend scanner detects
 unsafe uses of request data. Offline advisory matching covers a pinned Composer
-snapshot. Checks for calls to affected dependency code are not implemented yet.
+snapshot. A bounded Symfony profile adds possible path-prefix authorization
+check evidence. Other affected-code flows remain unknown.
 Preserve the scanner implementation when changing distribution code.
 
 ## Complete a change

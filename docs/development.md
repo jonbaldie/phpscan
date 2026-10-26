@@ -22,6 +22,8 @@ CI checks the same fixtures under each PHP version.
 `src/scan.bend` tracks taint and builds function summaries.
 `src/version.bend` owns the application version.
 `src/advisories.bend` owns inventory validation and dependency matches.
+`src/symfony.bend` owns the pure, bounded Request path-prefix evidence profile.
+Its qualified lexer entrypoint preserves names without changing taint tokens.
 `src/json.bend` parses lockfile JSON with source lines.
 `src/versions.bend` compares the supported exact SemVer subset.
 `src/catalog.bend` embeds the pinned advisory snapshot and is generated from
@@ -69,7 +71,9 @@ Before sending a change, follow [the agent workflow](agents/workflow.md) and
 2. Edit `advisories/composer.json`. Record the snapshot date, upstream update
    timestamp, source URLs, and any conflicting range metadata. Preserve empty
    affected-function metadata rather than inventing a reachable function.
-   This first catalog supports inclusive lower and exclusive upper bounds.
+   Each GHSA has package-specific affected ranges with optional inclusive lower
+   and exclusive upper bounds, plus a source-profile discriminator. Keep exact
+   package identities and range provenance on each interval.
 3. Run `python3 scripts/catalog.py` to regenerate `src/catalog.bend`.
 4. Add affected, fixed, and boundary subprocess cases to
    `tests/test_advisories.py`. Keep version evidence separate from affected-code
@@ -77,6 +81,7 @@ Before sending a change, follow [the agent workflow](agents/workflow.md) and
 5. Run `make setup build test lint cves`. All checks must pass.
 
 Build and lint run `python3 scripts/catalog.py --check` and fail if the embedded
-catalog is stale. Catalog updates are offline source changes, not automatic
+catalog is stale. `tests/catalog-check.bend` uses the scanner's version comparator
+to reject invalid, reversed, or overlapping package intervals. Catalog updates are offline source changes, not automatic
 runtime refreshes. The installed binary needs neither Python nor an advisory
 service.

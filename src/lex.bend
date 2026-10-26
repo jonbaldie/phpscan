@@ -593,6 +593,55 @@ def lex.begin(c: Cut) -> List<&2, Tok>:
     case Cut{+rest, +line, text, n}:
       lex.go(String.length(rest), Step{rest, line, lex.start(n, line)}, [])
 
+def without_ignores(ts: List<&2, Tok>) -> List<&2, Tok>:
+  match ts:
+    case Nil{}:
+      []
+    case Con{Tok{8, s, l}, rest}:
+      without_ignores(rest)
+    case Con{t, rest}:
+      Con{t, without_ignores(rest)}
+
+def ignored_lines(ts: List<&2, Tok>, +last: U32) -> List<&2, U32>:
+  match ts:
+    case Nil{}:
+      []
+    case Con{Tok{8, s, +l}, +rest}:
+      sel(List<&2, U32>, U32.is_eq(l, last), u => Con{l, ignored_lines(rest, last)}, u => Con{U32.add(l, 1), ignored_lines(rest, last)})
+    case Con{Tok{k, s, +l}, rest}:
+      ignored_lines(rest, l)
+
+def qualified.ident(w: Cut, +line: U32) -> Step:
+  match w:
+    case Cut{rest, l, name, n}:
+      Step{rest, line, [tok(1, String.to_lower(name), line)]}
+
+def qualified.step(+s: String, +line: U32) -> Step:
+  match s:
+    case SNil{}:
+      step(s, line)
+    case SCon{+c, t}:
+      sel(Step, is_id_start(c),
+        u => qualified.ident(word(s, True{}, SNil{}), line),
+        u => step(s, line))
+
+def qualified.go(fuel: Nat, st: Step, acc: List<&2, Tok>) -> List<&2, Tok>:
+  match fuel st:
+    case 0n Step{r, l, ts}:
+      push(ts, acc)
+    case _ Step{SNil{}, l, ts}:
+      push(ts, acc)
+    case 1n+p Step{r, l, ts}:
+      qualified.go(p, qualified.step(r, l), push(ts, acc))
+
+def qualified.begin(c: Cut) -> List<&2, Tok>:
+  match c:
+    case Cut{+rest, +line, text, n}:
+      qualified.go(String.length(rest), Step{rest, line, lex.start(n, line)}, [])
+
+def qualified(src: String) -> List<&2, Tok>:
+  List.reverse(&2, Tok, qualified.begin(html(src, 1)))
+
 # Lex a whole file, which starts in inline HTML.
 def lex(src: String) -> List<&2, Tok>:
   List.reverse(&2, Tok, lex.begin(html(src, 1)))

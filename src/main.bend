@@ -4,6 +4,7 @@ import ./lex.bend as L
 import ./version.bend as V
 import ./advisories.bend as A
 import ./catalog.bend as C
+import ./symfony.bend as P
 
 # phpscan: taint-tracking vulnerability scanner for PHP sources, for CI.
 #
@@ -184,26 +185,73 @@ def json.strings(xs: List<&2, String>) -> List<&2, String>:
     case Con{x, rest}:
       Con{json.str(x), json.strings(rest)}
 
+def source.props(sites: List<&2, P.Site>) -> List<&2, String>:
+  match sites:
+    case Nil{}:
+      []
+    case Con{P.Site{path, method, check, auth, typ, prefix}, rest}:
+      Con{"{\"kind\":\"possible path-prefix access check\",\"sourcePath\":" ++ json.str(path) ++
+        ",\"methodLine\":" ++ U32.show(method) ++ ",\"checkLine\":" ++ U32.show(check) ++
+        ",\"authorizationLine\":" ++ U32.show(auth) ++ ",\"receiverType\":" ++ json.str(typ) ++
+        ",\"prefix\":" ++ json.str(prefix) ++ "}", source.props(rest)}
+
+def source.location(+path: String, line: U32, label: String) -> String:
+  "{\"message\":{\"text\":" ++ json.str(label) ++ "},\"physicalLocation\":{\"artifactLocation\":{\"uri\":" ++ json.str(path) ++
+  "},\"region\":{\"startLine\":" ++ U32.show(line) ++ "}}}"
+
+def source.locations(sites: List<&2, P.Site>) -> List<&2, String>:
+  match sites:
+    case Nil{}:
+      []
+    case Con{P.Site{+path, method, check, auth, typ, prefix}, rest}:
+      Con{source.location(path, method, "possible getPathInfo call"),
+        Con{source.location(path, check, "possible path-prefix access check"),
+          Con{source.location(path, auth, "authorization marker"), source.locations(rest)}}}
+
+def advisory.related(f: A.Finding) -> String:
+  match f:
+    case A.Match{n, a, r, v, g, sites}:
+      ",\"relatedLocations\":[" ++ String.join(source.locations(sites), ",") ++ "]"
+    case _:
+      ""
+
 def advisory.props(f: A.Finding) -> String:
   match f:
-    case A.Match{n, C.Advisory{id, cve, package, +lower, upper, fixed, provenance, sources, functions}, version, group}:
+    case A.Match{n, C.Advisory{id, cve, profile, ranges, sources, functions}, C.AffectedRange{package, lower, upper, fixed, provenance}, version, group, +sites}:
       "{\"evidenceKind\":\"dependency-version\",\"ghsa\":" ++ json.str(id) ++ ",\"cve\":" ++ json.str(cve) ++
       ",\"package\":" ++ json.str(package) ++ ",\"installedVersion\":" ++ json.str(version) ++
-      ",\"dependencyGroup\":" ++ json.str(group) ++ ",\"affectedRange\":" ++ json.str(">=" ++ lower ++ ",<" ++ upper) ++
-      ",\"fixedVersion\":" ++ json.str(fixed) ++ ",\"affectedCode\":\"unknown\",\"runtimeExposure\":\"unknown\",\"exploitability\":\"unknown\",\"deployment\":\"unknown\",\"vulnerableFunctions\":[" ++
+      ",\"dependencyGroup\":" ++ json.str(group) ++ ",\"affectedRange\":" ++ json.str(A.range_text(lower, upper)) ++
+      ",\"fixedVersion\":" ++ json.str(fixed) ++ ",\"affectedCode\":" ++ json.str(L.sel(String, List.is_empty(&2, P.Site, sites), u => "unknown", u => "possible")) ++
+      ",\"sourceEvidence\":[" ++ String.join(source.props(sites), ",") ++
+      "],\"runtimeExposure\":\"unknown\",\"exploitability\":\"unknown\",\"deployment\":\"unknown\",\"middlewareRegistration\":\"unknown\",\"serverConfiguration\":\"unknown\",\"independentAuthorization\":\"unknown\",\"vulnerableFunctions\":[" ++
       String.join(json.strings(functions), ",") ++ "],\"sources\":[" ++ String.join(json.strings(sources), ",") ++
       "],\"rangeProvenance\":" ++ json.str(provenance) ++ ",\"catalogDate\":" ++ json.str(C.snapshot_date()) ++ "}"
     case A.Unknown{n, reason}:
       "{\"evidenceKind\":\"unknown\"}"
 
+def source.notices(sites: List<&2, P.Site>, +id: String, +cve: String) -> String:
+  match sites:
+    case Nil{}:
+      ""
+    case Con{P.Site{path, method, check, auth, typ, prefix}, rest}:
+      "::notice file=" ++ gh.escape(path) ++ ",line=" ++ U32.show(method) ++ ",title=phpscan " ++ id ++
+      "::" ++ cve ++ " / " ++ id ++ "; possible path-prefix access check; runtime exposure unknown; exploitability unknown\n" ++ source.notices(rest, id, cve)
+
+def advisory.notices(f: A.Finding) -> String:
+  match f:
+    case A.Match{n, C.Advisory{id, cve, profile, ranges, sources, functions}, r, v, g, sites}:
+      source.notices(sites, id, cve)
+    case _:
+      ""
+
 def advisory.one(fmt: U32, +path: String, +f: A.Finding) -> String:
   match fmt:
     case 1:
-      "::error file=" ++ gh.escape(path) ++ ",line=" ++ U32.show(A.line(f)) ++ ",title=phpscan " ++ A.rule(f) ++ "::" ++ gh.escape(A.message(f)) ++ "\n"
+      "::error file=" ++ gh.escape(path) ++ ",line=" ++ U32.show(A.line(f)) ++ ",title=phpscan " ++ A.rule(f) ++ "::" ++ gh.escape(A.message(f)) ++ "\n" ++ advisory.notices(f)
     case 2:
       "{\"ruleId\":" ++ json.str(A.rule(f)) ++ ",\"level\":" ++ json.str(L.sel(String, A.incomplete(f), u => "warning", u => "error")) ++
       ",\"message\":{\"text\":" ++ json.str(A.message(f)) ++ "},\"locations\":[{\"physicalLocation\":{\"artifactLocation\":{\"uri\":" ++
-      json.str(path) ++ "},\"region\":{\"startLine\":" ++ U32.show(A.line(f)) ++ "}}}],\"properties\":" ++ advisory.props(f) ++ "}"
+      json.str(path) ++ "},\"region\":{\"startLine\":" ++ U32.show(A.line(f)) ++ "}}}],\"properties\":" ++ advisory.props(f) ++ advisory.related(f) ++ "}"
     case _:
       path ++ ":" ++ U32.show(A.line(f)) ++ ": [" ++ A.rule(f) ++ "] " ++ A.message(f) ++ "\n"
 
@@ -218,7 +266,7 @@ def advisory.rules(rs: List<&2, C.Advisory>) -> List<&2, String>:
   match rs:
     case Nil{}:
       ["{\"id\":\"PHP-ADVISORY-INCOMPLETE\",\"shortDescription\":{\"text\":\"Dependency advisory analysis unknown\"}}"]
-    case Con{C.Advisory{id, cve, package, lower, upper, fixed, provenance, sources, functions}, rest}:
+    case Con{C.Advisory{id, cve, profile, ranges, sources, functions}, rest}:
       Con{"{\"id\":" ++ json.str(id) ++ ",\"shortDescription\":{\"text\":" ++ json.str(cve) ++ "}}", advisory.rules(rest)}
 
 def fmt.reps(rs: List<&2, Rep>, +fmt: U32) -> List<&2, String>:
@@ -315,6 +363,40 @@ def scan_all(n: Nat, xs: List<&2, Src>) -> List<&2, Rep>:
       a b = scan_all(p, List.take(&2, Src, ys, h)) scan_all(p, List.drop(&2, Src, ys, h))
       List.append(&2, Rep, a, b)
 
+def project.excluded(markers: List<&2, String>, +path: String) -> Bool:
+  match markers:
+    case Nil{}:
+      False{}
+    case Con{+marker, rest}:
+      +prefix = String.take(marker, Nat.sub(String.length(marker), 13n))
+      String.starts_with(path, prefix) || project.excluded(rest, path)
+
+def project.needs_source(rs: List<&2, Rep>) -> Bool:
+  match rs:
+    case Nil{}:
+      False{}
+    case Con{Inventory{p, fs}, rest}:
+      A.needs_source(fs) || project.needs_source(rest)
+    case Con{r, rest}:
+      project.needs_source(rest)
+
+def project.evidence(xs: List<&2, Src>, +markers: List<&2, String>) -> P.Evidence:
+  match xs:
+    case Nil{}:
+      P.Evidence{[], False{}}
+    case Con{Src{+p, t}, rest}:
+      P.merge(L.sel(P.Evidence, String.eq(p, "composer.lock") || String.ends_with(p, "/composer.lock") || project.excluded(markers, p),
+        u => P.Evidence{[], False{}}, u => P.scan(p, t)), project.evidence(rest, markers))
+
+def project.enrich(rs: List<&2, Rep>, +e: P.Evidence) -> List<&2, Rep>:
+  match rs:
+    case Nil{}:
+      []
+    case Con{Inventory{p, fs}, rest}:
+      Con{Inventory{p, A.enrich(fs, e)}, project.enrich(rest, e)}
+    case Con{r, rest}:
+      Con{r, project.enrich(rest, e)}
+
 def finish(+fmt: U32, +nfiles: U32, +rs: List<&2, Rep>) -> IO(Unit):
   +n = count(rs, False{})
   +inc = count(rs, True{})
@@ -352,15 +434,11 @@ def list_one(+p: String) -> IO(List<&2, String>):
     inventory : List<&2, String> <- found(p, locks)
     return List.append(&2, String, sources, inventory)
 
-def list_all(ps: List<&2, String>) -> IO(List<&2, String>):
-  match ps:
-    case Nil{}:
-      IO.pure(List<&2, String>, [])
-    case Con{+p, rest}:
-      do IO<List<&2, String>>:
-        a : List<&2, String> <- list_one(p)
-        b : List<&2, String> <- list_all(rest)
-        return List.append(&2, String, a, b)
+def list_boundaries(+p: String) -> IO(List<&2, String>):
+  do IO<List<&2, String>>:
+    r : Result<&1, &1, U32 & String, U32 & (String & String)> <-
+      Process.run("find", [safe_path(p), "-mindepth", "2", "-type", "f", "(", "-name", "composer.json", "-o", "-name", "composer.lock", ")"], "", 268435456, 120000)
+    found(p, r)
 
 def got(+p: String, r: Result<&1, &1, U32 & String, U32 & (String & String)>) -> IO(Src):
   match r:
@@ -390,14 +468,35 @@ def read_all(ps: List<&2, String>) -> IO(List<&2, Src>):
 def str.le(a: String, b: String) -> Bool:
   String.is_le(a, b)
 
-def scanned(+fmt: U32, +srcs: List<&2, Src>) -> IO(Unit):
-  finish(fmt, U32.from_nat(List.length(&2, Src, srcs)), scan_all(64n, srcs))
+def projects(ps: List<&2, String>) -> IO(List<&2, Rep>):
+  match ps:
+    case Nil{}:
+      IO.pure(List<&2, Rep>, [])
+    case Con{+p, rest}:
+      do IO<List<&2, Rep>>:
+        files : List<&2, String> <- list_one(p)
+        +srcs : List<&2, Src> <- read_all(List.sort(~String, ~str.le, files))
+        +rs : List<&2, Rep> = scan_all(64n, srcs)
+        +active : Bool = project.needs_source(rs)
+        markers : List<&2, String> <- L.sel(IO(List<&2, String>), active, u => list_boundaries(p), u => IO.pure(List<&2, String>, []))
+        a : List<&2, Rep> = L.sel(List<&2, Rep>, active, u => project.enrich(rs, project.evidence(srcs, markers)), u => rs)
+        b : List<&2, Rep> <- projects(rest)
+        return List.append(&2, Rep, a, b)
+
+def report.path(r: Rep) -> String:
+  match r:
+    case Rep{p, fs}:
+      p
+    case Inventory{p, fs}:
+      p
+
+def report.le(a: Rep, b: Rep) -> Bool:
+  String.is_le(report.path(a), report.path(b))
 
 def run(+fmt: U32, ps: List<&2, String>) -> IO(Unit):
   do IO<Unit>:
-    files : List<&2, String> <- list_all(ps)
-    srcs : List<&2, Src> <- read_all(List.sort(~String, ~str.le, files))
-    scanned(fmt, srcs)
+    +rs : List<&2, Rep> <- projects(ps)
+    finish(fmt, U32.from_nat(List.length(&2, Rep, rs)), List.sort(~Rep, ~report.le, rs))
 
 # ---------------------------------------------------------------- arguments
 

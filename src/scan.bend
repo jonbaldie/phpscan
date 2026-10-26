@@ -2243,26 +2243,6 @@ def decl_fs(ds: List<&2, Decl>, +fuel: Nat, +cx: Map<&2, Sum>) -> List<&2, Findi
 
 # ---------------------------------------------------------------- entry
 
-def toks.code(ts: List<&2, L.Tok>) -> List<&2, L.Tok>:
-  match ts:
-    case Nil{}:
-      []
-    case Con{L.Tok{8, s, l}, rest}:
-      toks.code(rest)
-    case Con{t, rest}:
-      Con{t, toks.code(rest)}
-
-# Lines a `phpscan-ignore` comment covers: its own line when it trails code,
-# the next line when it stands alone.
-def toks.ign(ts: List<&2, L.Tok>, +last: U32) -> List<&2, U32>:
-  match ts:
-    case Nil{}:
-      []
-    case Con{L.Tok{8, s, +l}, +rest}:
-      L.sel(List<&2, U32>, U32.is_eq(l, last), u => Con{l, toks.ign(rest, last)}, u => Con{U32.add(l, 1), toks.ign(rest, last)})
-    case Con{L.Tok{k, s, +l}, rest}:
-      toks.ign(rest, l)
-
 def u32.has(xs: List<&2, U32>, +x: U32) -> Bool:
   match xs:
     case Nil{}:
@@ -2306,9 +2286,9 @@ def f.sort(xs: List<&2, Finding>, +acc: List<&2, Finding>) -> List<&2, Finding>:
 # of fuel and is incomplete.
 def scan(src: String) -> List<&2, Finding>:
   +ts = L.lex(src)
-  +ns = T.tree(toks.code(ts))
+  +ns = T.tree(L.without_ignores(ts))
   +fuel = Nat.add(Nat.mul(List.length(&2, L.Tok, ts), 16n), 4096n)
   +ds = decls(fuel, DS{[DW{ns, False{}}], []})
   +cx = round(ds, fuel, round(ds, fuel, round(ds, fuel, MTip{})))
   top fs2 = st.fs(res_st(an(fuel, Stmts{ns, St{MTip{}, [], 0, 0}}, cx))) decl_fs(ds, fuel, cx)
-  f.sort(suppress(List.concat(&2, Finding, [top, fs2]), toks.ign(ts, 0)), [])
+  f.sort(suppress(List.concat(&2, Finding, [top, fs2]), L.ignored_lines(ts, 0)), [])

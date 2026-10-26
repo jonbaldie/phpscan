@@ -13,19 +13,36 @@ def render():
     for item in snapshot['advisories']:
         assert item['ghsa'] not in seen, 'duplicate GHSA'
         seen.add(item['ghsa'])
-        assert item['lower_inclusive'] and item['upper_exclusive'] == item['fixed']
-        strings = [item[key] for key in ['ghsa', 'cve', 'package', 'lower_inclusive',
-                                       'upper_exclusive', 'fixed', 'range_provenance']]
+        assert item['source_profile'] in {'none', 'symfony-path-prefix'}
+        ranges = []
+        for affected in item['affected_ranges']:
+            assert affected['upper_exclusive'] == affected['fixed']
+            assert isinstance(affected['package'], str) and affected['package']
+            lower = affected['lower_inclusive']
+            assert lower is None or (isinstance(lower, str) and lower)
+            fields = [json.dumps(affected['package']),
+                      'None{}' if lower is None else 'Some{' + json.dumps(lower) + '}']
+            for key in ['upper_exclusive', 'fixed', 'range_provenance']:
+                assert isinstance(affected[key], str) and affected[key]
+                fields.append(json.dumps(affected[key]))
+            ranges.append('AffectedRange{' + ', '.join(fields) + '}')
+        assert ranges
+        strings = [item[key] for key in ['ghsa', 'cve', 'source_profile']]
         assert all(isinstance(value, str) and value for value in strings)
         assert item['sources'] and all(url.startswith('https://') for url in item['sources'])
         assert isinstance(item['vulnerable_functions'], list)
+        assert all(isinstance(name, str) and name for name in item['vulnerable_functions'])
         fields = [json.dumps(value, ensure_ascii=False) for value in strings]
-        fields += [json.dumps(item['sources']), json.dumps(item['vulnerable_functions'])]
+        fields += ['[' + ', '.join(ranges) + ']', json.dumps(item['sources']),
+                   json.dumps(item['vulnerable_functions'])]
         records.append('    Advisory{' + ', '.join(fields) + '}')
     return '''import Base
 
+type AffectedRange is Data:
+  AffectedRange{package: String, lower: Maybe<&2, String>, upper: String, fixed: String, provenance: String}
+
 type Advisory is Data:
-  Advisory{ghsa: String, cve: String, package: String, lower: String, upper: String, fixed: String, provenance: String, sources: List<&2, String>, functions: List<&2, String>}
+  Advisory{ghsa: String, cve: String, profile: String, ranges: List<&2, AffectedRange>, sources: List<&2, String>, functions: List<&2, String>}
 
 def snapshot_date() -> String:
   ''' + json.dumps(snapshot['snapshot_date']) + '''
