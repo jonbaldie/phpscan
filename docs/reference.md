@@ -9,8 +9,11 @@ phpscan --version
 ```
 
 The default format is `text`. Findings go to stdout and the summary goes to
-stderr. GitHub output uses workflow annotations. SARIF output is one SARIF
-2.1.0 document, including an empty results array for a clean scan.
+stderr. Each text finding occupies one physical line. Text paths and messages
+encode carriage return and line feed as literal `\r` and `\n`. Other characters
+are unchanged. This encoding applies only to text output, not analysis data.
+GitHub output uses workflow annotations. SARIF output is one SARIF 2.1.0
+document, including an empty results array for a clean scan.
 
 | Exit code | Meaning |
 | --- | --- |

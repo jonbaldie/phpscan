@@ -106,10 +106,26 @@ def msg(+c: U32, s: String) -> String:
 
 # ---------------------------------------------------------------- formats
 
+def text.ch(c: Char) -> String:
+  match c:
+    case '\r':
+      "\\r"
+    case '\n':
+      "\\n"
+    case c:
+      SCon{c, SNil{}}
+
+def text.escape(s: String) -> String:
+  match s:
+    case SNil{}:
+      ""
+    case SCon{c, rest}:
+      text.ch(c) ++ text.escape(rest)
+
 def text.one(+path: String, f: S.Finding) -> String:
   match f:
     case S.Finding{l, +c, s}:
-      path ++ ":" ++ U32.show(l) ++ ": [" ++ cls_id(c) ++ "] " ++ msg(c, s) ++ "\n"
+      text.escape(path) ++ ":" ++ U32.show(l) ++ ": [" ++ cls_id(c) ++ "] " ++ text.escape(msg(c, s)) ++ "\n"
 
 def gh.ch(c: Char) -> String:
   match c:
@@ -262,7 +278,7 @@ def advisory.one(fmt: U32, +path: String, +f: A.Finding) -> String:
       ",\"message\":{\"text\":" ++ json.str(A.message(f)) ++ "},\"locations\":[{\"physicalLocation\":{\"artifactLocation\":{\"uri\":" ++
       json.str(path) ++ "},\"region\":{\"startLine\":" ++ U32.show(A.line(f)) ++ "}}}],\"properties\":" ++ advisory.props(f) ++ advisory.related(f) ++ "}"
     case _:
-      path ++ ":" ++ U32.show(A.line(f)) ++ ": [" ++ A.rule(f) ++ "] " ++ A.message(f) ++ "\n"
+      text.escape(path) ++ ":" ++ U32.show(A.line(f)) ++ ": [" ++ A.rule(f) ++ "] " ++ text.escape(A.message(f)) ++ "\n"
 
 def advisory.fs(fs: List<&2, A.Finding>, +fmt: U32, +path: String) -> List<&2, String>:
   match fs:
