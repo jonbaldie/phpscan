@@ -196,6 +196,26 @@ class LaravelTests(unittest.TestCase):
         self.database.write_text(DATABASE.replace("'mysql'", '"mysql"'))
         self.assertEqual(self.finding()['properties']['affectedCode'], 'possible')
 
+    def test_route_argument_layout_is_bounded_without_parsing_the_action(self):
+        for action, expected in [
+                ('fn () => 1', 'possible'),
+                ('fn () => 1,', 'possible'),
+                ("[Controller::class, 'show']", 'possible'),
+                ('factory(1, 2)', 'possible'),
+                ("fn () => 1, 'extra'", 'unknown'),
+                ('...$actions', 'unknown'),
+                ('action: fn () => 1', 'unknown')]:
+            with self.subTest(action=action):
+                self.route.write_text('<?php\nuse Illuminate\\Support\\Facades\\Route;\n'
+                                      "Route::middleware('auth:api')->get('/account', " + action + ');\n')
+                props = self.finding()['properties']
+                self.assertEqual(props['affectedCode'], expected)
+                if expected == 'unknown':
+                    self.assertEqual(props['sourceEvidence'], [])
+                else:
+                    self.assertEqual({s['kind'] for s in props['sourceEvidence']},
+                                     {'token-guard', 'guard-route', 'database-selection'})
+
     def test_block_string_identity_does_not_fabricate_a_guard_route_link(self):
         for opener, body, middleware in [
                 ("<<<'GUARD'", 'api', 'auth:api\n'),
