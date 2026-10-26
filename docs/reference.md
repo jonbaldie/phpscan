@@ -98,13 +98,14 @@ must be literal strings. The root array, guards, providers, and their entries
 must have unique keys. Unpacking, merged arrays, computed guard or provider
 entries, and malformed brackets do not produce positive evidence.
 Other config values remain uninterpreted, including model class expressions.
-The Laravel and Symfony source profiles treat double-quoted strings containing
-any backslash as unsupported, leaving literal-sensitive evidence unknown.
-Unescaped double-quoted strings and the existing single-quoted string behavior
-remain supported.
+The Laravel and Symfony source profiles support exact literals only through
+the established single-quoted behavior and unescaped double-quoted strings,
+including multiline quoted strings. Double-quoted strings containing any
+backslash, heredocs, nowdocs, and other unregistered literal producers leave
+literal-sensitive evidence unknown. Ordinary taint scanning is unchanged.
 A candidate requires a literal `guards[name]` with `driver => 'token'`,
-`hash => false`, and a literal provider name whose `providers[name]` entry
-has `driver => 'eloquent'`. A custom provider is unresolved.
+`hash => false`, and a literal provider name whose matching entry in
+`providers` has `driver => 'eloquent'`. A custom provider is unresolved.
 
 Routes must be standalone, top-level statements of the exact form
 `Route::middleware('auth:<guard>')->get(<literal URI>, <action>);`.

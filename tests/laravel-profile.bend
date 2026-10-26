@@ -8,6 +8,10 @@ def auth(+driver: String, +provider: String, +hash: String) -> String:
   "<?php\nreturn ['guards' => ['api' => [\n'driver' => " ++ driver ++ ", 'provider' => 'users', 'hash' => " ++ hash ++
   "]], 'providers' => ['users' => ['driver' => " ++ provider ++ ", 'model' => App\\Models\\User::class]]];\n"
 
+def auth.key(key: String) -> String:
+  "<?php\nreturn ['guards' => [" ++ key ++ " => ['driver' => 'token', 'provider' => 'users', 'hash' => false]], " ++
+    "'providers' => ['users' => ['driver' => 'eloquent']]];"
+
 def route() -> String:
   "<?php\nuse Illuminate\\Support\\Facades\\Route;\nRoute::middleware('auth:api')->get('/account', fn () => ['id' => auth()->id()]);\n"
 
@@ -63,6 +67,10 @@ def main() -> U32:
     observed(profile(a, "'mariadb'", r), "possible") &&
     observed(profile(auth("\"token\"", "\"eloquent\"", "false"), "\"mysql\"", r), "possible") &&
     observed(profile(a, "\"my\\sql\"", r), "unknown") &&
+    observed(profile(a, "<<<DB\nmysql\nDB\n", r), "unknown") &&
+    observed(profile(a, "<<<'DB'\nmysql\nDB\n", r), "unknown") &&
+    empty(profile(auth.key("<<<KEY\napi\nKEY\n"), "'mysql'", "<?php\nuse Illuminate\\Support\\Facades\\Route;\nRoute::middleware('auth:api\n')->get('/account', fn () => 1);")) &&
+    empty(profile(auth.key("<<<'KEY'\napi\nKEY\n"), "'mysql'", "<?php\nuse Illuminate\\Support\\Facades\\Route;\nRoute::middleware('auth:api\n')->get('/account', fn () => 1);")) &&
     empty(profile(auth("\"t\\oken\"", "'eloquent'", "false"), "'mysql'", r)) &&
     empty(profile(auth("'token'", "\"elo\\quent\"", "false"), "'mysql'", r)) &&
     observed(profile(a, "'mysql'", "<?php\nuse Illuminate\\Support\\Facades\\Route;\nRoute::middleware(\"auth:api\")->get(\"/account\", fn () => 1);"), "possible") &&
