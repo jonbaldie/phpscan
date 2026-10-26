@@ -9,6 +9,7 @@ python3 scripts/check-docs.py
 git diff --check
 scripts/bend.sh src/main.bend --check-only
 scripts/bend.sh tests/version-order.bend | grep -qx 0
+scripts/bend.sh tests/qualified-strings.bend | grep -qx 0
 scripts/bend.sh tests/symfony-profile.bend | grep -qx 0
 scripts/bend.sh tests/laravel-profile.bend | grep -qx 0
 scripts/bend.sh tests/catalog-check.bend | grep -qx 0

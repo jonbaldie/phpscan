@@ -98,6 +98,10 @@ must be literal strings. The root array, guards, providers, and their entries
 must have unique keys. Unpacking, merged arrays, computed guard or provider
 entries, and malformed brackets do not produce positive evidence.
 Other config values remain uninterpreted, including model class expressions.
+The Laravel and Symfony source profiles treat double-quoted strings containing
+any backslash as unsupported, leaving literal-sensitive evidence unknown.
+Unescaped double-quoted strings and the existing single-quoted string behavior
+remain supported.
 A candidate requires a literal `guards[name]` with `driver => 'token'`,
 `hash => false`, and a literal provider name whose `providers[name]` entry
 has `driver => 'eloquent'`. A custom provider is unresolved.
@@ -113,8 +117,11 @@ route statements are outside this grammar. Strings, comments, and unrelated
 facades do not establish a link. Guard names match case-sensitively.
 
 Only a resolved guard-route link produces `token-guard` and `guard-route`
-observations with status `possible`. A literal database default of `mysql` or
-`mariadb` adds a separate `database-selection` observation with status `possible`.
+observations with status `possible`. Database observations require a valid link
+between a TokenGuard guard, its provider, and a route. They are not a standalone
+inventory.
+A literal database default of `mysql` or `mariadb` adds a separate
+`database-selection` observation with status `possible`.
 A dynamic default, such as `env('DB_CONNECTION')`, or another literal database
 adds a database observation with status `unknown` at the default field's line.
 The guard and route remain possible. Missing fields or malformed optional

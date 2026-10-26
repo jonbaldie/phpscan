@@ -12,6 +12,7 @@ import Base
 #   6 CAST   text = the cast type, e.g. "int"
 #   7 BTICK  text = names of variables interpolated into a shell string
 #   8 IGN    a `phpscan-ignore` comment on this line
+#   9 USTR   qualified-only unsupported string; text is empty
 type Tok is Data:
   Tok{kind: U32, text: String, line: U32}
 
@@ -616,10 +617,30 @@ def qualified.ident(w: Cut, +line: U32) -> Step:
     case Cut{rest, l, name, n}:
       Step{rest, line, [tok(1, String.to_lower(name), line)]}
 
+def qualified.string.raw(s: String) -> Bool:
+  match s:
+    case SNil{}:
+      False{}
+    case SCon{'\\', t}:
+      False{}
+    case SCon{'"', t}:
+      True{}
+    case SCon{c, t}:
+      qualified.string.raw(t)
+
+def qualified.string.step(trusted: Bool, st: Step) -> Step:
+  match trusted st:
+    case False{} Step{rest, line, Con{Tok{2, text, start}, Nil{}}}:
+      Step{rest, line, [tok(9, "", start)]}
+    case _ st:
+      st
+
 def qualified.step(+s: String, +line: U32) -> Step:
   match s:
     case SNil{}:
       step(s, line)
+    case SCon{'"', t}:
+      qualified.string.step(qualified.string.raw(t), step(s, line))
     case SCon{+c, t}:
       sel(Step, is_id_start(c),
         u => qualified.ident(word(s, True{}, SNil{}), line),

@@ -61,6 +61,12 @@ def main() -> U32:
   +r = route()
   ok = observed(profile(a, "'mysql'", r), "possible") &&
     observed(profile(a, "'mariadb'", r), "possible") &&
+    observed(profile(auth("\"token\"", "\"eloquent\"", "false"), "\"mysql\"", r), "possible") &&
+    observed(profile(a, "\"my\\sql\"", r), "unknown") &&
+    empty(profile(auth("\"t\\oken\"", "'eloquent'", "false"), "'mysql'", r)) &&
+    empty(profile(auth("'token'", "\"elo\\quent\"", "false"), "'mysql'", r)) &&
+    observed(profile(a, "'mysql'", "<?php\nuse Illuminate\\Support\\Facades\\Route;\nRoute::middleware(\"auth:api\")->get(\"/account\", fn () => 1);"), "possible") &&
+    empty(profile(a, "'mysql'", "<?php\nuse Illuminate\\Support\\Facades\\Route;\nRoute::middleware(\"auth:a\\pi\")->get('/account', fn () => 1);")) &&
     observed(profile(a, "env('DB_CONNECTION')", r), "unknown") &&
     observed(profile(a, "'pgsql'", r), "unknown") &&
     observed(profile(a, "'mysql'", "<?php\nuse Illuminate\\Support\\Facades\\Route as R;\nR::middleware('auth:api')->get('/x', fn () => 1);"), "possible") &&
