@@ -2,6 +2,8 @@ import Base
 import ./scan.bend as S
 import ./lex.bend as L
 import ./version.bend as V
+import ./advisories.bend as A
+import ./catalog.bend as C
 
 # phpscan: taint-tracking vulnerability scanner for PHP sources, for CI.
 #
@@ -15,6 +17,7 @@ type Src is Data:
 
 type Rep is Data:
   Rep{path: String, fs: List<&2, S.Finding>}
+  Inventory{path: String, fs: List<&2, A.Finding>}
 
 type Opts is Data:
   Opts{fmt: U32, paths: List<&2, String>, bad: String}
@@ -174,12 +177,58 @@ def fmt.fs(fs: List<&2, S.Finding>, +fmt: U32, +path: String) -> List<&2, String
     case Con{f, rest}:
       Con{fmt.one(fmt, path, f), fmt.fs(rest, fmt, path)}
 
+def json.strings(xs: List<&2, String>) -> List<&2, String>:
+  match xs:
+    case Nil{}:
+      []
+    case Con{x, rest}:
+      Con{json.str(x), json.strings(rest)}
+
+def advisory.props(f: A.Finding) -> String:
+  match f:
+    case A.Match{n, C.Advisory{id, cve, package, +lower, upper, fixed, provenance, sources, functions}, version, group}:
+      "{\"evidenceKind\":\"dependency-version\",\"ghsa\":" ++ json.str(id) ++ ",\"cve\":" ++ json.str(cve) ++
+      ",\"package\":" ++ json.str(package) ++ ",\"installedVersion\":" ++ json.str(version) ++
+      ",\"dependencyGroup\":" ++ json.str(group) ++ ",\"affectedRange\":" ++ json.str(">=" ++ lower ++ ",<" ++ upper) ++
+      ",\"fixedVersion\":" ++ json.str(fixed) ++ ",\"affectedCode\":\"unknown\",\"runtimeExposure\":\"unknown\",\"exploitability\":\"unknown\",\"deployment\":\"unknown\",\"vulnerableFunctions\":[" ++
+      String.join(json.strings(functions), ",") ++ "],\"sources\":[" ++ String.join(json.strings(sources), ",") ++
+      "],\"rangeProvenance\":" ++ json.str(provenance) ++ ",\"catalogDate\":" ++ json.str(C.snapshot_date()) ++ "}"
+    case A.Unknown{n, reason}:
+      "{\"evidenceKind\":\"unknown\"}"
+
+def advisory.one(fmt: U32, +path: String, +f: A.Finding) -> String:
+  match fmt:
+    case 1:
+      "::error file=" ++ gh.escape(path) ++ ",line=" ++ U32.show(A.line(f)) ++ ",title=phpscan " ++ A.rule(f) ++ "::" ++ gh.escape(A.message(f)) ++ "\n"
+    case 2:
+      "{\"ruleId\":" ++ json.str(A.rule(f)) ++ ",\"level\":" ++ json.str(L.sel(String, A.incomplete(f), u => "warning", u => "error")) ++
+      ",\"message\":{\"text\":" ++ json.str(A.message(f)) ++ "},\"locations\":[{\"physicalLocation\":{\"artifactLocation\":{\"uri\":" ++
+      json.str(path) ++ "},\"region\":{\"startLine\":" ++ U32.show(A.line(f)) ++ "}}}],\"properties\":" ++ advisory.props(f) ++ "}"
+    case _:
+      path ++ ":" ++ U32.show(A.line(f)) ++ ": [" ++ A.rule(f) ++ "] " ++ A.message(f) ++ "\n"
+
+def advisory.fs(fs: List<&2, A.Finding>, +fmt: U32, +path: String) -> List<&2, String>:
+  match fs:
+    case Nil{}:
+      []
+    case Con{f, rest}:
+      Con{advisory.one(fmt, path, f), advisory.fs(rest, fmt, path)}
+
+def advisory.rules(rs: List<&2, C.Advisory>) -> List<&2, String>:
+  match rs:
+    case Nil{}:
+      ["{\"id\":\"PHP-ADVISORY-INCOMPLETE\",\"shortDescription\":{\"text\":\"Dependency advisory analysis unknown\"}}"]
+    case Con{C.Advisory{id, cve, package, lower, upper, fixed, provenance, sources, functions}, rest}:
+      Con{"{\"id\":" ++ json.str(id) ++ ",\"shortDescription\":{\"text\":" ++ json.str(cve) ++ "}}", advisory.rules(rest)}
+
 def fmt.reps(rs: List<&2, Rep>, +fmt: U32) -> List<&2, String>:
   match rs:
     case Nil{}:
       []
     case Con{Rep{+path, fs}, rest}:
       List.append(&2, String, fmt.fs(fs, fmt, path), fmt.reps(rest, fmt))
+    case Con{Inventory{+path, fs}, rest}:
+      List.append(&2, String, advisory.fs(fs, fmt, path), fmt.reps(rest, fmt))
 
 def sarif.rule(+c: U32) -> String:
   "{\"id\":" ++ json.str(cls_id(c)) ++ ",\"name\":" ++ json.str(cls_text(c)) ++
@@ -187,7 +236,7 @@ def sarif.rule(+c: U32) -> String:
 
 def sarif.doc(results: List<&2, String>) -> String:
   "{\"version\":\"2.1.0\",\"$schema\":\"https://json.schemastore.org/sarif-2.1.0.json\",\"runs\":[{\"tool\":{\"driver\":{\"name\":\"phpscan\",\"version\":" ++ json.str(V.value()) ++ ",\"rules\":[" ++
-  String.join([sarif.rule(1), sarif.rule(2), sarif.rule(4), sarif.rule(8), sarif.rule(16), sarif.rule(32), sarif.rule(64), sarif.rule(128), sarif.rule(256), sarif.rule(512), sarif.rule(0)], ",") ++
+  String.join(List.append(&2, String, [sarif.rule(1), sarif.rule(2), sarif.rule(4), sarif.rule(8), sarif.rule(16), sarif.rule(32), sarif.rule(64), sarif.rule(128), sarif.rule(256), sarif.rule(512), sarif.rule(0)], advisory.rules(C.records())), ",") ++
   "]}},\"results\":[" ++ String.join(results, ",") ++ "]}]}\n"
 
 def render(+fmt: U32, rs: List<&2, Rep>) -> String:
@@ -213,12 +262,21 @@ def count.fs(fs: List<&2, S.Finding>, +want0: Bool) -> U32:
 
 # ---------------------------------------------------------------- status
 
+def count.advisories(fs: List<&2, A.Finding>, +want0: Bool) -> U32:
+  match fs:
+    case Nil{}:
+      0
+    case Con{f, rest}:
+      U32.add(L.sel(U32, b.eq(A.incomplete(f), want0), u => 1, u => 0), count.advisories(rest, want0))
+
 def count(rs: List<&2, Rep>, +want0: Bool) -> U32:
   match rs:
     case Nil{}:
       0
     case Con{Rep{p, fs}, rest}:
       U32.add(count.fs(fs, want0), count(rest, want0))
+    case Con{Inventory{p, fs}, rest}:
+      U32.add(count.advisories(fs, want0), count(rest, want0))
 
 def status(+n: U32, +inc: U32) -> U32:
   L.sel(U32, U32.is_lt(0, inc), u => 2, u => L.sel(U32, U32.is_lt(0, n), v => 1, v => 0))
@@ -230,8 +288,9 @@ def summary(nfiles: U32, +n: U32, +inc: U32) -> String:
 
 def scan1(x: Src) -> Rep:
   match x:
-    case Src{p, t}:
-      Rep{p, S.scan(t)}
+    case Src{+p, +t}:
+      L.sel(Rep, String.eq(p, "composer.lock") || String.ends_with(p, "/composer.lock"),
+        u => Inventory{p, A.scan(t)}, u => Rep{p, S.scan(t)})
 
 def scan_seq(xs: List<&2, Src>) -> List<&2, Rep>:
   match xs:
@@ -287,7 +346,11 @@ def list_one(+p: String) -> IO(List<&2, String>):
   do IO<List<&2, String>>:
     r : Result<&1, &1, U32 & String, U32 & (String & String)> <-
       Process.run("find", [safe_path(p), "-type", "f", "(", "-name", "*.php", "-o", "-name", "*.phtml", "-o", "-name", "*.inc", ")"], "", 268435456, 120000)
-    found(p, r)
+    sources : List<&2, String> <- found(p, r)
+    locks : Result<&1, &1, U32 & String, U32 & (String & String)> <-
+      Process.run("find", [safe_path(p), "-maxdepth", "1", "-type", "f", "-name", "composer.lock"], "", 268435456, 120000)
+    inventory : List<&2, String> <- found(p, locks)
+    return List.append(&2, String, sources, inventory)
 
 def list_all(ps: List<&2, String>) -> IO(List<&2, String>):
   match ps:
@@ -393,7 +456,7 @@ def to2(xs: List<&1, String>) -> List<&2, String>:
 def help() -> String:
   "phpscan " ++ V.value() ++ " - PHP taint scanner\n\n" ++ usage() ++
   "\n\nOptions:\n  --format=text|github|sarif  Output format (default: text)\n  --help, -h                 Show this help\n  --version                  Show the version\n\n" ++
-  "Directories include .php, .phtml, and .inc files.\nFindings go to stdout; the summary goes to stderr.\nExit codes: 0 clean, 1 findings, 2 usage/I/O error or incomplete analysis.\n"
+  "Directories include .php, .phtml, and .inc files.\nProject roots also check composer.lock against the pinned offline catalog.\nFindings go to stdout; the summary goes to stderr.\nExit codes: 0 clean, 1 findings, 2 usage/I/O error or incomplete analysis.\n"
 
 def entry(as: List<&2, String>) -> IO(Unit):
   match as:

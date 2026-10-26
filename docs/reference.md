@@ -19,7 +19,11 @@ stderr. GitHub output uses workflow annotations. SARIF output is one SARIF
 | 2 | Invalid arguments, a discovery/read error, or reported incomplete analysis. This takes precedence over findings. |
 
 File discovery includes `.php`, `.phtml`, and `.inc` names, sorts the paths,
-and scans files independently. Symlinked directories are not followed.
+and scans files independently. Each explicitly scanned directory also checks
+its immediate `composer.lock`. An explicit `composer.lock` file is supported.
+Nested lockfiles are not discovered unless their directory is an input.
+The summary's file count includes lockfiles.
+Symlinked directories are not followed.
 Overlapping input directories can scan a file more than once.
 An empty directory returns 0. Paths with newline characters are unsupported.
 Use `./` before a path whose name starts with `-`.
@@ -33,17 +37,54 @@ Windows and Alpine/musl are not supported. macOS binaries are not notarized.
 ## CVE coverage
 
 A CVE identifies a known vulnerability. A CWE describes a type of weakness.
-The scanner reports weakness rules such as `PHP-CODEI` and their CWEs. It does
-not report CVE identifiers, read advisory records, or identify installed
-vulnerable dependency versions. It also does not check whether an application
-can call code named in a CVE advisory. These are gaps in phpscan's intended
-CVE checking, not capabilities supplied by its current rules.
+The source scanner reports weakness rules such as `PHP-CODEI` and their CWEs.
+The separate offline dependency scanner matches exact installed versions from
+`composer.lock` against a pinned, embedded [advisory catalog](../advisories/composer.json).
+The catalog currently covers only `livewire/livewire` CVE-2025-54068,
+GHSA-29cq-5w36-x7w3, in `>=3.0.0-beta.1,<3.6.4`. Version 3.6.3 is affected.
+Version 3.6.4 is the first fix. The catalog records the discrepancy between the
+maintainer's structured range and prose and the reviewed Composer boundary.
+It is not a complete Composer advisory database.
+
+Dependency findings report the installed version, interval, fix boundary,
+lockfile location, and dependency group. Both `packages` and `packages-dev`
+are checked. Development dependencies are labeled separately, with deployment
+unknown. Missing `packages-dev` means an empty development inventory.
+A missing lockfile leaves source-only scanning available. It does not establish
+that dependencies are safe. `packages` must be an array of entries with string
+`name` and `version` fields. Malformed JSON or inventory produces
+`PHP-ADVISORY-INCOMPLETE` and exit 2, even alongside findings.
+
+Supported versions are exact SemVer `MAJOR.MINOR.PATCH`, optionally prefixed
+with lowercase `v`, with optional prerelease and build identifiers. Core
+components are integers from 0 to 4294967295, without leading zeros.
+Prerelease identifiers use SemVer numeric and lexical ordering. Build metadata
+does not affect ordering. Composer constraints, branch aliases, four-component
+versions, and unresolved development versions are unsupported. An unsupported
+version for a catalogued package produces an unknown analysis and exit 2.
+Packages absent from the catalog have no advisory coverage, regardless of version.
+The scanner does not resolve dependencies or query a live advisory service.
+
+A version match exits 1 unless analysis is incomplete. A completed no-match
+exits 0. This means no match in this limited snapshot, not a dependency safety
+certification. Text and GitHub messages identify dependency-version evidence.
+SARIF properties also separate the dependency group, version, interval, source
+URLs, catalog date, and range provenance. Affected-code evidence, runtime
+exposure, exploitation, and deployment remain unknown. The pinned Livewire
+record has no affected-function metadata. The scanner does not infer
+reachability from that absence and does not execute application code.
+
+JSON accepts escaped strings and Unicode surrogate pairs and rejects duplicate
+object keys. Parsing has a 100000-step recursive budget. An exhausted budget
+produces an incomplete advisory analysis, not a clean scan.
+See [catalog updates](development.md#update-the-offline-advisory-catalog).
 
 The [CVE regression manifest](../tests/cve/manifest.tsv) names exact vulnerable
 and fixed upstream PHP files. `make cves` downloads and verifies those files,
-then checks for an expected rule finding or its absence. The test harness
-supplies the CVE identifier. The scanner does not infer it. Passing these
-cases does not establish general detection of those CVEs in a PHP project.
+then checks for an expected rule finding or its absence. For these source-only
+cases, the test harness supplies the CVE identifier. The source scanner does not
+infer it. Passing these cases does not establish general detection of those
+CVEs in a PHP project.
 
 For CVE detection work, verify the advisory identifier, affected versions,
 and any available affected-function metadata. Keep a version match separate
