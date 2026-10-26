@@ -310,7 +310,8 @@ echo $_GET['name'];
         (sibling / 'composer.lock').write_text(self.lock.read_text())
         result = self.scan('sarif', self.root, sibling)
         self.assertEqual(result.returncode, 1, result.stderr)
-        results = json.loads(result.stdout)['runs'][0]['results']
+        results = [r for r in json.loads(result.stdout)['runs'][0]['results']
+                   if r['ruleId'] == GHSA]
         self.assertEqual([r['properties']['affectedCode'] for r in results], ['unknown', 'possible'])
         result = self.scan('sarif', self.lock, sibling / 'config/auth.php',
                            sibling / 'config/database.php', sibling / 'routes/api.php')
@@ -332,7 +333,8 @@ function access(Request $request) {
         result = self.scan()
         self.assertEqual(result.returncode, 1, result.stderr)
         findings = {r['ruleId']: r for r in json.loads(result.stdout)['runs'][0]['results']}
-        self.assertEqual(set(findings), {GHSA, 'GHSA-3rg7-wf37-54rm'})
+        self.assertEqual(set(findings), {GHSA, 'GHSA-3rg7-wf37-54rm', 'GHSA-5wcm-3v2w-8362'})
+        self.assertEqual(findings['GHSA-5wcm-3v2w-8362']['properties']['sourceEvidence'], [])
         self.assertEqual({s['kind'] for s in findings[GHSA]['properties']['sourceEvidence']},
                          {'token-guard', 'guard-route', 'database-selection'})
         self.assertEqual({s['kind'] for s in findings['GHSA-3rg7-wf37-54rm']['properties']['sourceEvidence']},
@@ -353,7 +355,7 @@ function access(Request $request) {
         result = self.scan()
         self.assertEqual(result.returncode, 1, result.stderr)
         self.assertEqual({r['ruleId'] for r in json.loads(result.stdout)['runs'][0]['results']},
-                         {'PHP-XSS', GHSA})
+                         {'PHP-XSS', GHSA, 'GHSA-5wcm-3v2w-8362'})
 
     def test_suppression_drops_source_evidence_not_the_dependency_match(self):
         self.route.write_text(ROUTE.replace("Route::middleware", "// phpscan-ignore\nRoute::middleware"))

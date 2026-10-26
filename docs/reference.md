@@ -60,7 +60,12 @@ The first interval has no lower bound. The reviewed 13.x lower bound takes
 precedence over the maintainer's unbounded `<13.29.0` shorthand so patched
 12.x does not match the 13.x interval. The patch adds string-token checks
 before credential retrieval. This is not a SQL-injection rule or blanket
-Sanctum or Passport advisory. It is not a complete Composer advisory database.
+Sanctum or Passport advisory.
+The catalog also covers `laravel/framework`
+CVE-2026-114508 / GHSA-5wcm-3v2w-8362 in `>=12.45.0,<12.68.0` and
+`>=13.0.0,<13.27.0`, fixed in 12.68.0 and 13.27.0. It prefers the reviewed
+branch-specific intervals over the maintainer's overlapping, unbounded rows.
+This is not a complete Composer advisory database.
 
 Dependency findings report the installed version, interval, fix boundary,
 lockfile location, and dependency group. Both `packages` and `packages-dev`
@@ -171,6 +176,38 @@ exploitability, deployment, middleware registration, server configuration, and
 independent authorization remain unknown. The pinned Livewire
 record has no affected-function metadata. The scanner does not infer
 reachability from that absence and does not execute application code.
+
+The bounded `laravel-jsonapi` profile identifies direct subclasses of
+`Illuminate\Http\Resources\JsonApi\JsonApiResource` through simple explicit
+imports, aliases, or fully qualified names. Ordinary `JsonResource` responses
+produce no JSON:API evidence. A `toRelationships` method containing only
+`return ['literal', ...];` supplies declared relationship names, with their
+original spelling and case. Empty literal arrays are known empty declarations,
+not proof of safety. Computed, interpolated, unpacked, or keyed arrays leave
+relationships unknown.
+
+A possible endpoint requires an explicit
+`Illuminate\Support\Facades\Route::get` call with a literal path and an arrow
+function returning `new Resource(...)`, or a closure containing only that
+return statement. The returned class must resolve to the same unique resource
+by its fully qualified, case-normalized identity. Endpoint evidence also
+requires an unsuppressed literal relationship declaration. A matching basename
+alone is insufficient. Duplicate class declarations prevent a positive join, including
+when one declaration is suppressed. Resource observations anchor at the class
+line, relationships at the return line, and endpoints at the route call line.
+Suppressed resource or relationship declarations cannot supply endpoint
+locations. Suppression never removes the dependency match.
+
+Indirect inheritance, controller dispatch, route groups, chained registrations,
+factories, and conditional returns are outside this profile. Ambiguous imports,
+complex or multiple namespaces, unsupported class headers, unindexed class
+declarations, and malformed brackets leave the project's JSON:API evidence unknown. Profile inputs must
+belong to one scan root and exclude nested Composer projects, as with Symfony.
+Traversal fuel derives from token counts; exhaustion is incomplete analysis,
+not a clean scan. Missing model definitions do not erase an exact syntactic
+resource link. Model resolution, runtime registration, actual data deletion,
+exposure, and exploitability remain unknown. The profile does not execute PHP
+or infer that ordinary Eloquent relationship loading is insecure.
 
 JSON accepts escaped strings and Unicode surrogate pairs and rejects duplicate
 object keys. Parsing has a 100000-step recursive budget. An exhausted budget

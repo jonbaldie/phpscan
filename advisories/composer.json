@@ -107,6 +107,34 @@
           "range_provenance": "Reviewed GitHub Composer interval >=13.0.0,<13.29.0. The maintainer's <13.29.0 shorthand omits the 13.x lower bound; prefer the reviewed branch interval so patched 12.x is not matched."
         }
       ]
+    },
+    {
+      "ghsa": "GHSA-5wcm-3v2w-8362",
+      "cve": "CVE-2026-114508",
+      "source_profile": "laravel-jsonapi",
+      "upstream_updated_at": "2026-10-23T21:47:49Z",
+      "vulnerable_functions": [],
+      "sources": [
+        "https://github.com/advisories/GHSA-5wcm-3v2w-8362",
+        "https://github.com/laravel/framework/security/advisories/GHSA-5wcm-3v2w-8362",
+        "https://github.com/laravel/framework/commit/50a7970efe9f9990b6ec4f1e949de2abaaf4263e"
+      ],
+      "affected_ranges": [
+        {
+          "package": "laravel/framework",
+          "lower_inclusive": "12.45.0",
+          "upper_exclusive": "12.68.0",
+          "fixed": "12.68.0",
+          "range_provenance": "Reviewed GitHub Composer interval >=12.45.0,<12.68.0 and upstream patch boundary. The maintainer's unbounded >=12.45.0 row overlaps fixed releases; prefer the reviewed branch-specific interval."
+        },
+        {
+          "package": "laravel/framework",
+          "lower_inclusive": "13.0.0",
+          "upper_exclusive": "13.27.0",
+          "fixed": "13.27.0",
+          "range_provenance": "Reviewed GitHub Composer interval >=13.0.0,<13.27.0 and upstream patch boundary. The maintainer's <13.27.0 row omits the branch lower bound; prefer the reviewed branch-specific interval."
+        }
+      ]
     }
   ]
 }

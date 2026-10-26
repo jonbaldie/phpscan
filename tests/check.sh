@@ -21,4 +21,7 @@ for f in "$@"; do
     fail=1
   fi
 done
+if ! python3 tests/test_jsonapi.py "$bin"; then
+  fail=1
+fi
 exit $fail
