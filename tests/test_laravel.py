@@ -196,6 +196,33 @@ class LaravelTests(unittest.TestCase):
         self.database.write_text(DATABASE.replace("'mysql'", '"mysql"'))
         self.assertEqual(self.finding()['properties']['affectedCode'], 'possible')
 
+    def test_route_context_and_import_order_are_not_flat_statement_guesses(self):
+        use = 'use Illuminate\\Support\\Facades\\Route;'
+        call = "Route::middleware('auth:api')->get('/account', fn () => 1);"
+        cases = [
+            (use + '\n' + call, 'possible'),
+            (use + "\n$unused = 'literal';\n" + call, 'possible'),
+            (use + '\nif (false) { $unused = 1; ' + call + ' }', 'unknown'),
+            (use + '\nif (false): $unused = 1;\n' + call + '\nendif;', 'unknown'),
+            (use + '\nif (true): $unused = 1; else: $unused = 2;\n' + call + '\nendif;', 'unknown'),
+            (use + '\nswitch (1): case 2: $unused = 1;\n' + call + '\nendswitch;', 'unknown'),
+            (use + '\ndeclare(ticks=1): $unused = 1;\n' + call + '\nenddeclare;', 'unknown'),
+            (use + '\nfor ($i=0; $i<0; $i++): $unused = 1;\n' + call + '\nendfor;', 'unknown'),
+            (use + '\nwhile (false): $unused = 1;\n' + call + '\nendwhile;', 'unknown'),
+            (use + '\nforeach ([] as $x): $unused = 1;\n' + call + '\nendforeach;', 'unknown'),
+            (use + '\n__halt_compiler();\n' + call, 'unknown'),
+            (use + '\n__HALT_COMPILER();\n' + call, 'unknown'),
+            (call + '\n' + use, 'unknown'),
+            (call.replace('Route::', '\\Illuminate\\Support\\Facades\\Route::'), 'possible'),
+        ]
+        for source, expected in cases:
+            with self.subTest(source=source):
+                self.route.write_text('<?php\n' + source + '\n')
+                props = self.finding()['properties']
+                self.assertEqual(props['affectedCode'], expected)
+                if expected == 'unknown':
+                    self.assertEqual(props['sourceEvidence'], [])
+
     def test_route_argument_layout_is_bounded_without_parsing_the_action(self):
         for action, expected in [
                 ('fn () => 1', 'possible'),
