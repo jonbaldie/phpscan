@@ -178,16 +178,45 @@ class LaravelTests(unittest.TestCase):
         self.assertEqual(self.finding()['properties']['affectedCode'], 'unknown')
 
     def test_unsupported_string_escapes_do_not_establish_literal_configuration(self):
-        self.auth.write_text(AUTH.replace("'token'", r'"t\oken"'))
-        props = self.finding()['properties']
-        self.assertEqual(props['affectedCode'], 'unknown')
+        for config in [AUTH.replace("'token'", r'"t\oken"'),
+                       AUTH.replace("'eloquent'", r'"elo\quent"')]:
+            with self.subTest(config=config):
+                self.auth.write_text(config)
+                self.assertEqual(self.finding()['properties']['affectedCode'], 'unknown')
         self.auth.write_text(AUTH)
+        self.route.write_text(ROUTE.replace("'auth:api'", r'"auth:a\pi"'))
+        self.assertEqual(self.finding()['properties']['affectedCode'], 'unknown')
+        self.route.write_text(ROUTE)
         self.database.write_text(DATABASE.replace("'mysql'", r'"my\sql"'))
         item, = [s for s in self.finding()['properties']['sourceEvidence']
                  if s['kind'] == 'database-selection']
         self.assertEqual(item['status'], 'unknown')
-        self.database.write_text(DATABASE)
+        self.auth.write_text(AUTH.replace("'token'", '"token"').replace("'eloquent'", '"eloquent"'))
+        self.route.write_text(ROUTE.replace("'auth:api'", '"auth:api"'))
+        self.database.write_text(DATABASE.replace("'mysql'", '"mysql"'))
         self.assertEqual(self.finding()['properties']['affectedCode'], 'possible')
+
+    def test_qualified_literal_policy_also_covers_symfony_without_changing_taint(self):
+        self.inventory('7.3.6', 'symfony/http-foundation')
+        source = self.root / 'Prefix.php'
+        text = r'''<?php
+use Illuminate\Http\Request;
+function access(Request $request) {
+    if (str_starts_with($request->getPathInfo(), "/ad\min")) {
+        abort_unless(auth()->check(), 403);
+    }
+}
+echo $_GET['name'];
+'''
+        for prefix, expected in [(r'/ad\min', 'unknown'), ('/admin', 'possible')]:
+            with self.subTest(prefix=prefix):
+                source.write_text(text.replace(r'/ad\min', prefix))
+                result = self.scan()
+                self.assertEqual(result.returncode, 1, result.stderr)
+                findings = {r['ruleId']: r for r in json.loads(result.stdout)['runs'][0]['results']}
+                self.assertEqual(set(findings), {'GHSA-3rg7-wf37-54rm', 'PHP-XSS'})
+                self.assertEqual(findings['GHSA-3rg7-wf37-54rm']['properties']['affectedCode'], expected)
+                self.assertEqual(findings['PHP-XSS']['locations'][0]['physicalLocation']['region']['startLine'], 8)
 
     def test_unrelated_arrays_and_malformed_config_are_not_guard_evidence(self):
         variants = [
