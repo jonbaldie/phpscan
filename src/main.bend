@@ -7,6 +7,7 @@ import ./catalog.bend as C
 import ./symfony.bend as P
 import ./evidence.bend as E
 import ./laravel.bend as G
+import ./jsonapi.bend as J
 
 # phpscan: taint-tracking vulnerability scanner for PHP sources, for CI.
 #
@@ -420,9 +421,19 @@ def project.symfony(xs: List<&2, E.Src>) -> E.Evidence:
     case Con{E.Src{p, t}, rest}:
       E.merge(P.scan(p, t), project.symfony(rest))
 
-def project.evidence(+root: String, +xs: List<&2, E.Src>) -> E.Evidence:
-  a b = project.symfony(xs) G.analyze(root, xs)
-  E.merge(a, b)
+def project.needs_profile(rs: List<&2, Rep>, +profile: String) -> Bool:
+  match rs:
+    case Nil{}:
+      False{}
+    case Con{Inventory{p, fs}, rest}:
+      A.needs_profile(fs, profile) || project.needs_profile(rest, profile)
+    case Con{r, rest}:
+      project.needs_profile(rest, profile)
+
+def project.evidence(root: String, +xs: List<&2, E.Src>, +rs: List<&2, Rep>) -> E.Evidence:
+  a b = L.sel(E.Evidence, project.needs_profile(rs, "symfony-path-prefix"), u => project.symfony(xs), u => E.Evidence{[], False{}}) L.sel(E.Evidence, project.needs_profile(rs, "laravel-token-guard"), u => G.analyze(root, xs), u => E.Evidence{[], False{}})
+  c = L.sel(E.Evidence, project.needs_profile(rs, "laravel-jsonapi"), u => J.scan(xs), u => E.Evidence{[], False{}})
+  E.merge(E.merge(a, b), c)
 
 def project.enrich(rs: List<&2, Rep>, +e: E.Evidence) -> List<&2, Rep>:
   match rs:
@@ -515,7 +526,7 @@ def projects(ps: List<&2, String>) -> IO(List<&2, Rep>):
         +rs : List<&2, Rep> = scan_all(64n, srcs)
         +active : Bool = project.needs_source(rs)
         markers : List<&2, String> <- L.sel(IO(List<&2, String>), active, u => list_boundaries(p), u => IO.pure(List<&2, String>, []))
-        a : List<&2, Rep> = L.sel(List<&2, Rep>, active, u => project.enrich(rs, project.evidence(p, project.sources(srcs, markers))), u => rs)
+        a : List<&2, Rep> = L.sel(List<&2, Rep>, active, u => project.enrich(rs, project.evidence(p, project.sources(srcs, markers), rs)), u => rs)
         b : List<&2, Rep> <- projects(rest)
         return List.append(&2, Rep, a, b)
 

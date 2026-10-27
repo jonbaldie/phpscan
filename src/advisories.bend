@@ -162,12 +162,24 @@ def decoded(v: Maybe<&2, J.Value>) -> List<&2, Finding>:
     case _:
       [Unknown{1, "malformed, unsupported, or over-budget composer.lock JSON; expected an object"}]
 
+def source_profile(+profile: String) -> Bool:
+  String.eq(profile, "symfony-path-prefix") || String.eq(profile, "laravel-token-guard") || String.eq(profile, "laravel-jsonapi")
+
+def needs_profile(fs: List<&2, Finding>, +profile: String) -> Bool:
+  match fs:
+    case Nil{}:
+      False{}
+    case Con{Match{n, C.Advisory{id, cve, p, ranges, sources, functions}, r, v, g, sites}, rest}:
+      String.eq(p, profile) || needs_profile(rest, profile)
+    case Con{f, rest}:
+      needs_profile(rest, profile)
+
 def needs_source(fs: List<&2, Finding>) -> Bool:
   match fs:
     case Nil{}:
       False{}
     case Con{Match{n, C.Advisory{id, cve, +profile, ranges, sources, functions}, r, v, g, sites}, rest}:
-      String.eq(profile, "symfony-path-prefix") || String.eq(profile, "laravel-token-guard") || needs_source(rest)
+      source_profile(profile) || needs_source(rest)
     case Con{f, rest}:
       needs_source(rest)
 
@@ -178,7 +190,7 @@ def enrich(fs: List<&2, Finding>, +e: E.Evidence) -> List<&2, Finding>:
     case Con{Match{+n, +a, +r, +v, +g, old}, rest}:
       C.Advisory{id, cve, +profile, ranges, sources, functions} = a
       E.Evidence{+sites, +inc} = e
-      found = L.sel(List<&2, Finding>, String.eq(profile, "symfony-path-prefix") || String.eq(profile, "laravel-token-guard"),
+      found = L.sel(List<&2, Finding>, source_profile(profile),
         u => L.sel(List<&2, Finding>, inc,
           v0 => [Match{n, a, r, v, g, []}, Unknown{n, "source evidence analysis exhausted its budget"}],
           v0 => [Match{n, a, r, v, g, E.for_profile(sites, profile)}]),

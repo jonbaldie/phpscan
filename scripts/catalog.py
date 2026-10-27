@@ -13,7 +13,8 @@ def render():
     for item in snapshot['advisories']:
         assert item['ghsa'] not in seen, 'duplicate GHSA'
         seen.add(item['ghsa'])
-        assert item['source_profile'] in {'none', 'symfony-path-prefix', 'laravel-token-guard'}
+        assert item['source_profile'] in {
+            'none', 'symfony-path-prefix', 'laravel-token-guard', 'laravel-jsonapi'}
         ranges = []
         for affected in item['affected_ranges']:
             assert affected['upper_exclusive'] == affected['fixed']

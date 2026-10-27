@@ -169,7 +169,7 @@ def main() -> U32:
     empty(profile("<?php return ['guards' => [", "'mysql'", r)) &&
     empty(P.analyze("other", sources(a, "'mysql'", r))) &&
     no_database(P.analyze("project", [E.Src{"project/config/auth.php", a}, E.Src{"project/routes/api.php", r}])) &&
-    version("0.0.1", 1) && version("12.67.0", 1) && version("12.68.0", 0) &&
-    version("13.0.0", 1) && version("13.28.0", 1) && version("13.29.0", 0) &&
+    version("0.0.1", 1) && version("12.67.0", 2) && version("12.68.0", 0) &&
+    version("13.0.0", 2) && version("13.28.0", 1) && version("13.29.0", 0) &&
     isolated(A.enrich(A.scan("{\"packages\":[{\"name\":\"symfony/http-foundation\",\"version\":\"7.3.6\"}]}"), profile(a, "'mysql'", r)))
   L.sel(U32, ok, u => 0, u => 1)

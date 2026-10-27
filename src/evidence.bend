@@ -8,6 +8,9 @@ type ObservationKind is Data:
   TokenGuard{}
   GuardRoute{}
   DatabaseSelection{}
+  JsonApiResource{}
+  JsonApiRelationships{}
+  JsonApiEndpoint{}
 
 type ObservationStatus is Data:
   Possible{}
@@ -28,6 +31,27 @@ def kind(k: ObservationKind) -> String:
       "guard-route"
     case DatabaseSelection{}:
       "database-selection"
+    case JsonApiResource{}:
+      "jsonapi-resource"
+    case JsonApiRelationships{}:
+      "jsonapi-relationships"
+    case JsonApiEndpoint{}:
+      "jsonapi-endpoint"
+
+def profile(k: ObservationKind) -> String:
+  match k:
+    case TokenGuard{}:
+      "laravel-token-guard"
+    case GuardRoute{}:
+      "laravel-token-guard"
+    case DatabaseSelection{}:
+      "laravel-token-guard"
+    case JsonApiResource{}:
+      "laravel-jsonapi"
+    case JsonApiRelationships{}:
+      "laravel-jsonapi"
+    case JsonApiEndpoint{}:
+      "laravel-jsonapi"
 
 def status(s: ObservationStatus) -> String:
   match s:
@@ -67,16 +91,16 @@ def suppress(e: Evidence, lines: List<&2, U32>) -> Evidence:
     case Evidence{sites, inc}:
       Evidence{visible(sites, lines), inc}
 
-def for_profile(sites: List<&2, Site>, +profile: String) -> List<&2, Site>:
+def for_profile(sites: List<&2, Site>, +wanted_profile: String) -> List<&2, Site>:
   match sites:
     case Nil{}:
       []
     case Con{Site{p, m, c, a, t, s}, rest}:
-      +wanted = for_profile(rest, profile)
-      L.sel(List<&2, Site>, String.eq(profile, "symfony-path-prefix"), u => Con{Site{p, m, c, a, t, s}, wanted}, u => wanted)
-    case Con{Observation{p, l, k, s, d}, rest}:
-      +wanted = for_profile(rest, profile)
-      L.sel(List<&2, Site>, String.eq(profile, "laravel-token-guard"), u => Con{Observation{p, l, k, s, d}, wanted}, u => wanted)
+      +wanted = for_profile(rest, wanted_profile)
+      L.sel(List<&2, Site>, String.eq(wanted_profile, "symfony-path-prefix"), u => Con{Site{p, m, c, a, t, s}, wanted}, u => wanted)
+    case Con{Observation{p, l, +k, s, d}, rest}:
+      +wanted = for_profile(rest, wanted_profile)
+      L.sel(List<&2, Site>, String.eq(wanted_profile, profile(k)), u => Con{Observation{p, l, k, s, d}, wanted}, u => wanted)
 
 def possible(sites: List<&2, Site>) -> Bool:
   match sites:
