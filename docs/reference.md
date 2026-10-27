@@ -198,11 +198,27 @@ line, relationships at the return line, and endpoints at the route call line.
 Suppressed resource or relationship declarations cannot supply endpoint
 locations. Suppression never removes the dependency match.
 
+Supported file context is an optional `declare(strict_types=1);` statement,
+followed by an optional single simple `namespace Name;` and leading simple
+`use` imports or aliases. The strict-types declaration can precede the namespace.
+Imports must precede all other declarations and statements, including on the same
+line. Any later import leaves the whole project's JSON:API evidence unknown,
+even when a fully qualified name or an earlier route needs no import.
+
+A root-level identifier `__halt_compiler`, `endif`, `endwhile`, `endfor`,
+`endforeach`, `endswitch`, or `enddeclare`, in any letter case, also leaves the
+whole project's JSON:API evidence unknown. Compiler-halt data never supplies
+code evidence. This conservatively excludes alternative-syntax control blocks
+without interpreting their bodies. The context check does not inspect grouped
+nodes, comments, or strings. Other `declare` forms are unsupported. The profile
+does not validate general PHP syntax or control flow.
+
 Indirect inheritance, controller dispatch, route groups, chained registrations,
 factories, and conditional returns are outside this profile. Ambiguous imports,
 complex or multiple namespaces, unsupported class headers, unindexed class
-declarations, and malformed brackets leave the project's JSON:API evidence unknown. Profile inputs must
-belong to one scan root and exclude nested Composer projects, as with Symfony.
+declarations, and malformed brackets leave the project's JSON:API evidence unknown.
+Profile inputs must belong to one scan root and exclude nested Composer projects,
+as with Symfony.
 Traversal fuel derives from token counts; exhaustion is incomplete analysis,
 not a clean scan. Missing model definitions do not erase an exact syntactic
 resource link. Model resolution, runtime registration, actual data deletion,

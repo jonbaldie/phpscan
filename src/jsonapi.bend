@@ -82,28 +82,42 @@ def has_alias(xs: List<&2, Import>, +alias: String) -> Bool:
 def valid_import(name: String, +alias: String, im: List<&2, Import>) -> Bool:
   qualified_name(absolute(name), True{}) && simple_name(alias, True{}) && Bool.not(has_alias(im, alias))
 
-def scope(ns: List<&2, T.Node>, namespace: String, +im: List<&2, Import>) -> Scope:
-  match ns:
-    case Nil{}:
+def unsupported_keyword(+name: String) -> Bool:
+  String.eq(name, "endif") || String.eq(name, "endwhile") || String.eq(name, "endfor") ||
+    String.eq(name, "endforeach") || String.eq(name, "endswitch") || String.eq(name, "enddeclare") ||
+    String.eq(name, "__halt_compiler") || String.eq(name, "declare")
+
+def scope(ns: List<&2, T.Node>, namespace: String, +im: List<&2, Import>, leading: Bool) -> Scope:
+  match ns leading:
+    case Nil{} _:
       Scope{namespace, im}
-    case Con{T.Leaf{L.Tok{1, "namespace", l}}, rest}:
+    case Con{T.Leaf{L.Tok{1, "namespace", l}}, rest} _:
       Invalid{}
-    case Con{T.Leaf{L.Tok{1, "use", l}}, Con{T.Leaf{L.Tok{1, +name, n}}, Con{T.Leaf{L.Tok{5, ";", e}}, rest}}}:
+    case Con{T.Leaf{L.Tok{1, "use", l}}, Con{T.Leaf{L.Tok{1, +name, n}}, Con{T.Leaf{L.Tok{5, ";", e}}, rest}}} True{}:
       +alias = L.strip_ns(name)
-      L.sel(Scope, valid_import(name, alias, im), u => scope(rest, namespace, Con{Import{alias, absolute(name)}, im}), u => Invalid{})
-    case Con{T.Leaf{L.Tok{1, "use", l}}, Con{T.Leaf{L.Tok{1, +name, n}}, Con{T.Leaf{L.Tok{1, "as", a}}, Con{T.Leaf{L.Tok{1, +alias, b}}, Con{T.Leaf{L.Tok{5, ";", e}}, rest}}}}}:
-      L.sel(Scope, valid_import(name, alias, im), u => scope(rest, namespace, Con{Import{alias, absolute(name)}, im}), u => Invalid{})
-    case Con{T.Leaf{L.Tok{1, "use", l}}, rest}:
+      L.sel(Scope, valid_import(name, alias, im), u => scope(rest, namespace, Con{Import{alias, absolute(name)}, im}, True{}), u => Invalid{})
+    case Con{T.Leaf{L.Tok{1, "use", l}}, Con{T.Leaf{L.Tok{1, +name, n}}, Con{T.Leaf{L.Tok{1, "as", a}}, Con{T.Leaf{L.Tok{1, +alias, b}}, Con{T.Leaf{L.Tok{5, ";", e}}, rest}}}}} True{}:
+      L.sel(Scope, valid_import(name, alias, im), u => scope(rest, namespace, Con{Import{alias, absolute(name)}, im}, True{}), u => Invalid{})
+    case Con{T.Leaf{L.Tok{1, "use", l}}, rest} _:
       Invalid{}
-    case Con{n, rest}:
-      scope(rest, namespace, im)
+    case Con{T.Leaf{L.Tok{1, name, l}}, rest} _:
+      L.sel(Scope, unsupported_keyword(name), u => Invalid{}, u => scope(rest, namespace, im, False{}))
+    case Con{n, rest} _:
+      scope(rest, namespace, im, False{})
+
+def namespace_scope(ns: List<&2, T.Node>) -> Scope:
+  match ns:
+    case Con{T.Leaf{L.Tok{1, "namespace", l}}, Con{T.Leaf{L.Tok{1, +name, n}}, Con{T.Leaf{L.Tok{5, ";", e}}, rest}}}:
+      L.sel(Scope, qualified_name(name, True{}), u => scope(rest, name, [], True{}), u => Invalid{})
+    case ns:
+      scope(ns, "", [], True{})
 
 def file_scope(ns: List<&2, T.Node>) -> Scope:
   match ns:
-    case Con{T.Leaf{L.Tok{1, "namespace", l}}, Con{T.Leaf{L.Tok{1, +name, n}}, Con{T.Leaf{L.Tok{5, ";", e}}, rest}}}:
-      L.sel(Scope, qualified_name(name, True{}), u => scope(rest, name, []), u => Invalid{})
+    case Con{T.Leaf{L.Tok{1, "declare", l}}, Con{T.Grp{40, p, Con{T.Leaf{L.Tok{1, "strict_types", s}}, Con{T.Leaf{L.Tok{5, "=", e}}, Con{T.Leaf{L.Tok{4, "1", v}}, Nil{}}}}}, Con{T.Leaf{L.Tok{5, ";", c}}, rest}}}:
+      namespace_scope(rest)
     case ns:
-      scope(ns, "", [])
+      namespace_scope(ns)
 
 def join(+namespace: String, +name: String) -> String:
   L.sel(String, String.is_empty(namespace), u => name, u => namespace ++ "\\" ++ name)
