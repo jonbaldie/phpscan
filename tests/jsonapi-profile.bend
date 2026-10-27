@@ -43,7 +43,7 @@ def supported() -> Bool:
     String.eq(scan(resource("ApiBase", "use Illuminate\\Http\\Resources\\JsonApi\\JsonApiResource as ApiBase;", "return ['Comments', 'posts',];"), "<?php use App\\Http\\Resources\\UserResource as ApiUser; use Illuminate\\Support\\Facades\\Route as Router; Router::get('/alias', function ($user) { return new ApiUser($user); });"), "app.php:5|jsonapi-resource|possible\napp.php:9|jsonapi-relationships|possible|literal declared relationships: [Comments, posts]; model resolution unknown\nroute.php:1|jsonapi-endpoint|possible\n") &&
     String.eq(scan(resource("\\Illuminate\\Http\\Resources\\JsonApi\\JsonApiResource", "", "return [];"), "<?php \\Illuminate\\Support\\Facades\\Route::get('/fq', fn () => new \\App\\Http\\Resources\\UserResource());"), "app.php:5|jsonapi-resource|possible\napp.php:9|jsonapi-relationships|possible|literal declared relationships: []; model resolution unknown\nroute.php:1|jsonapi-endpoint|possible\n") &&
     String.eq(scan(standard(), "<?php namespace App\\Http\\Resources; use Illuminate\\Support\\Facades\\Route; Route::get('/local', fn () => new UserResource());"), declared() ++ "route.php:1|jsonapi-endpoint|possible\n") &&
-    String.eq(snapshot(P.scan([E.Src{"one.php", standard() ++ "use Illuminate\\Support\\Facades\\Route; Route::get('/same', fn () => new UserResource());"}])), "one.php:5|jsonapi-resource|possible\none.php:9|jsonapi-relationships|possible|literal declared relationships: [comments]; model resolution unknown\none.php:12|jsonapi-endpoint|possible\n") &&
+    String.eq(snapshot(P.scan([E.Src{"one.php", resource("JsonApiResource", "use Illuminate\\Http\\Resources\\JsonApi\\JsonApiResource; use Illuminate\\Support\\Facades\\Route;", "return ['comments'];") ++ "Route::get('/same', fn () => new UserResource());"}])), "one.php:5|jsonapi-resource|possible\none.php:9|jsonapi-relationships|possible|literal declared relationships: [comments]; model resolution unknown\none.php:12|jsonapi-endpoint|possible\n") &&
     String.eq(snapshot(P.scan([E.Src{"route.php", route()}, E.Src{"app.php", standard()}])), declared() ++ "route.php:5|jsonapi-endpoint|possible\n")
 
 def rejected() -> Bool:
@@ -61,6 +61,20 @@ def rejected() -> Bool:
     String.eq(scan(standard() ++ "namespace Other;", route()), "") &&
     String.eq(scan(resource("JsonApiResource", "use Illuminate\\Http\\Resources\\JsonApi\\JsonApiResource; use Other\\Base as JsonApiResource;", "return ['comments'];"), route()), "") &&
     String.eq(scan(resource("JsonApiResource", "use Illuminate\\Http\\Resources\\JsonApi\\{JsonApiResource};", "return ['comments'];"), route()), "")
+
+def context() -> Bool:
+  String.eq(scan(standard(), route()), declared() ++ "route.php:5|jsonapi-endpoint|possible\n") &&
+    String.eq(scan(resource("JsonApiResource", "", "return ['comments'];") ++ "use Illuminate\\Http\\Resources\\JsonApi\\JsonApiResource;", route()), "") &&
+    String.eq(scan(standard(), "<?php use Illuminate\\Support\\Facades\\Route; Route::get('/late', fn () => new UserResource()); use App\\Http\\Resources\\UserResource;"), "") &&
+    String.eq(scan(standard(), "<?php use App\\Http\\Resources\\UserResource; Route::get('/late', fn () => new UserResource()); use Illuminate\\Support\\Facades\\Route;"), "") &&
+    String.eq(scan(resource("JsonApiResource", "use Illuminate\\Http\\Resources\\JsonApi\\JsonApiResource; __halt_compiler();", "return ['comments'];"), route()), "") &&
+    String.eq(scan(standard(), route() ++ "__HALT_COMPILER(); raw data"), "") &&
+    String.eq(scan(standard(), "<?php use App\\Http\\Resources\\UserResource; use Illuminate\\Support\\Facades\\Route; foreach ([] as $item): noop(); Route::get('/nested', fn () => new UserResource()); endforeach;"), "") &&
+    String.eq(scan(standard(), "<?php use App\\Http\\Resources\\UserResource; use Illuminate\\Support\\Facades\\Route; if (true): noop(); Route::get('/nested', fn () => new UserResource()); ENDIF;"), "") &&
+    String.eq(scan(resource("JsonApiResource", "use Illuminate\\Http\\Resources\\JsonApi\\JsonApiResource; while (false): noop();", "return ['comments'];") ++ "endwhile;", route()), "") &&
+    String.eq(scan(standard(), "<?php declare(strict_types=1); namespace Api; use App\\Http\\Resources\\UserResource; use Illuminate\\Support\\Facades\\Route; Route::get('/strict', fn () => new UserResource());"), declared() ++ "route.php:1|jsonapi-endpoint|possible\n") &&
+    String.eq(scan("<?php declare(strict_types=1); namespace App\\Http\\Resources; use Illuminate\\Http\\Resources\\JsonApi\\JsonApiResource; class UserResource extends JsonApiResource { function toRelationships() { return ['comments']; } }", route()), "app.php:1|jsonapi-resource|possible\napp.php:1|jsonapi-relationships|possible|literal declared relationships: [comments]; model resolution unknown\nroute.php:5|jsonapi-endpoint|possible\n") &&
+    String.eq(scan(standard(), "<?php use App\\Http\\Resources\\UserResource; use Illuminate\\Support\\Facades\\Route; $words = ['endif', '__halt_compiler']; /* endforeach */ Route::get('/opaque', fn () => new UserResource(Other::endif()));"), declared() ++ "route.php:1|jsonapi-endpoint|possible\n")
 
 def dynamic() -> Bool:
   +expected = {"app.php:5|jsonapi-resource|possible\napp.php:9|jsonapi-relationships|unknown|dynamic relationships; relationships unknown; model resolution unknown\n" : String}
@@ -129,4 +143,5 @@ def main() -> U32:
       u => L.sel(U32, dynamic(),
         u => L.sel(U32, suppression(),
           u => L.sel(U32, collisions(),
-            u => L.sel(U32, combined(P.scan([E.Src{"app.php", standard()}, E.Src{"route.php", route()}])), u => 0, u => 6), u => 5), u => 4), u => 3), u => 2), u => 1)
+            u => L.sel(U32, context(),
+              u => L.sel(U32, combined(P.scan([E.Src{"app.php", standard()}, E.Src{"route.php", route()}])), u => 0, u => 6), u => 7), u => 5), u => 4), u => 3), u => 2), u => 1)

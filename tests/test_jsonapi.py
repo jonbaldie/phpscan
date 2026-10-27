@@ -58,6 +58,112 @@ class JsonApiTests(unittest.TestCase):
         self.assertEqual(len(matches), 1, result.stdout)
         return matches[0]
 
+    def assert_normal_evidence(self):
+        finding = self.finding(self.scan())
+        self.assertEqual(finding['properties']['affectedCode'], 'possible')
+        self.assertEqual([(row['kind'], row['sourcePath'], row['line'], row['status'])
+                          for row in finding['properties']['sourceEvidence']], [
+            ('jsonapi-resource', str(self.resource), 5, 'possible'),
+            ('jsonapi-relationships', str(self.resource), 9, 'possible'),
+            ('jsonapi-endpoint', str(self.route), 5, 'possible'),
+        ])
+
+    def assert_context_unknown(self):
+        finding = self.finding(self.scan())
+        self.assertEqual(finding['properties']['cve'], 'CVE-2026-114508')
+        self.assertEqual(finding['properties']['installedVersion'], 'v12.67.0')
+        self.assertEqual(finding['properties']['affectedCode'], 'unknown')
+        self.assertEqual(finding['properties']['runtimeExposure'], 'unknown')
+        self.assertEqual(finding['properties']['exploitability'], 'unknown')
+        self.assertEqual(finding['properties']['sourceEvidence'], [])
+        self.assertEqual(finding.get('relatedLocations', []), [])
+
+    def test_forward_resource_base_import_is_unknown(self):
+        self.assert_normal_evidence()
+        import_line = 'use Illuminate\\Http\\Resources\\JsonApi\\JsonApiResource;\n'
+        self.resource.write_text(RESOURCE.replace(import_line, '') + '\n' + import_line)
+        self.assert_context_unknown()
+
+    def test_forward_endpoint_resource_import_is_unknown(self):
+        self.assert_normal_evidence()
+        import_line = 'use App\\Http\\Resources\\UserResource;\n'
+        self.route.write_text(ROUTE.replace(import_line, '') + '\n' + import_line)
+        self.assert_context_unknown()
+
+    def test_forward_facade_import_is_unknown(self):
+        self.assert_normal_evidence()
+        import_line = 'use Illuminate\\Support\\Facades\\Route;\n'
+        for source in [ROUTE.replace(import_line, '') + '\n' + import_line,
+                       ROUTE.replace(import_line, '').rstrip() + ' ' + import_line,
+                       ROUTE + 'use Other\\Unused;\n']:
+            with self.subTest(source=source):
+                self.route.write_text(source)
+                self.assert_context_unknown()
+
+    def test_compiler_halt_data_is_not_code(self):
+        self.assert_normal_evidence()
+        for source, endpoint in [
+                (RESOURCE.replace('class UserResource',
+                                  '__halt_compiler();\nclass UserResource'), ROUTE),
+                (RESOURCE, ROUTE.replace('Route::get', '__HALT_COMPILER();\nRoute::get')),
+                (RESOURCE, ROUTE + '__halt_compiler();\nraw data\n')]:
+            with self.subTest(source=source, endpoint=endpoint):
+                self.resource.write_text(source)
+                self.route.write_text(endpoint)
+                self.assert_context_unknown()
+
+    def test_alternative_loop_route_after_statement_is_unknown(self):
+        self.assert_normal_evidence()
+        self.route.write_text(ROUTE.replace('Route::get',
+                                           'foreach ([] as $item):\nnoop();\nRoute::get') +
+                              '\nendforeach;\n')
+        self.assert_context_unknown()
+
+    def test_alternative_control_contexts_are_unknown(self):
+        self.assert_normal_evidence()
+        for start, end in [('if (true):', 'endif;'),
+                           ('while (false):', 'endwhile;'),
+                           ('for (; false;):', 'endfor;'),
+                           ('switch (1): case 1:', 'endswitch;'),
+                           ('declare(ticks=1):', 'enddeclare;')]:
+            with self.subTest(start=start):
+                self.resource.write_text(RESOURCE)
+                self.route.write_text(ROUTE.replace('Route::get', start + '\nnoop();\nRoute::get') +
+                                      '\n' + end + '\n')
+                self.assert_context_unknown()
+                self.route.write_text(ROUTE)
+                self.resource.write_text(RESOURCE.replace('class UserResource',
+                                                          start + '\nnoop();\nclass UserResource') +
+                                         '\n' + end.upper() + '\n')
+                self.assert_context_unknown()
+
+    def test_leading_imports_strict_types_and_fully_qualified_names(self):
+        self.assert_normal_evidence()
+        self.resource.write_text(RESOURCE.replace('<?php\n', '<?php\ndeclare(strict_types=1);\n'))
+        self.route.write_text(ROUTE.replace('<?php\n',
+                                           '<?php\ndeclare(strict_types=1);\nnamespace Api;\n'))
+        finding = self.finding(self.scan())
+        self.assertEqual([(row['kind'], row['line'], row['status'])
+                          for row in finding['properties']['sourceEvidence']], [
+            ('jsonapi-resource', 6, 'possible'),
+            ('jsonapi-relationships', 10, 'possible'),
+            ('jsonapi-endpoint', 7, 'possible'),
+        ])
+        self.resource.write_text(RESOURCE.replace(
+            'use Illuminate\\Http\\Resources\\JsonApi\\JsonApiResource;\n', '').replace(
+                'extends JsonApiResource',
+                'extends \\Illuminate\\Http\\Resources\\JsonApi\\JsonApiResource'))
+        self.route.write_text(r'''<?php
+\Illuminate\Support\Facades\Route::get('/users', fn () => new \App\Http\Resources\UserResource());
+''')
+        finding = self.finding(self.scan())
+        self.assertEqual([(row['kind'], row['line'], row['status'])
+                          for row in finding['properties']['sourceEvidence']], [
+            ('jsonapi-resource', 4, 'possible'),
+            ('jsonapi-relationships', 8, 'possible'),
+            ('jsonapi-endpoint', 2, 'possible'),
+        ])
+
     def test_reviewed_version_boundaries(self):
         self.resource.unlink()
         self.route.unlink()
@@ -125,6 +231,7 @@ class JsonApiTests(unittest.TestCase):
                 self.assertEqual(result.stdout, self.scan(fmt).stdout)
 
     def test_ordinary_json_resource_keeps_only_version_match(self):
+        self.assert_normal_evidence()
         self.resource.write_text(RESOURCE.replace(
             'Resources\\JsonApi\\JsonApiResource', 'Resources\\Json\\JsonResource')
                                  .replace('extends JsonApiResource', 'extends JsonResource'))
@@ -214,6 +321,7 @@ class JsonApiTests(unittest.TestCase):
                          ['jsonapi-resource', 'jsonapi-relationships', 'jsonapi-endpoint'])
 
     def test_comments_and_strings_are_not_source_evidence(self):
+        self.assert_normal_evidence()
         for text in ['<?php\n/*\n' + RESOURCE + '\n*/\n',
                      "<?php\n$example = <<<'PHP_SAMPLE'\n" + RESOURCE + '\nPHP_SAMPLE;\n']:
             with self.subTest(source=text):
@@ -223,6 +331,7 @@ class JsonApiTests(unittest.TestCase):
                 self.assertEqual(finding['properties']['sourceEvidence'], [])
 
     def test_nested_composer_project_does_not_supply_evidence(self):
+        self.assert_normal_evidence()
         nested = self.root / 'nested'
         nested.mkdir()
         (nested / 'composer.json').write_text('{}')
