@@ -16,20 +16,60 @@ import Base
 type Tok is Data:
   Tok{kind: U32, text: String, line: U32}
 
-# What a sub-lexer answers: the rest of the input, the line it ends on, the
-# text it read and a small code (meaning depends on the sub-lexer).
 type Cut is Data:
-  Cut{rest: String, line: U32, text: String, n: U32}
+  Cut{rest: String, line: U32, text: String}
 
-# One step of the main loop: the rest, the line, and tokens newest first.
 type Step is Data:
   Step{rest: String, line: U32, toks: List<&2, Tok>}
 
-# Interpolation scanner state (double quotes, backticks, heredocs).
-#   mode 0 text, 1 in $name, 2 in {$name, 3 skipping {..} expr, 4 in ${name,
-#   5 after '$', 6 after '{', 7 after '\', 99 finished
+type StringContents is Data:
+  LiteralText{text: String}
+  InterpolatedNames{names: String}
+
+type StringCut is Data:
+  StringCut{rest: String, line: U32, contents: StringContents}
+
+type QuoteEnd is Data:
+  EndOfInput{}
+  QuoteCharacter{code: U32}
+
+type CastProbe is Data:
+  CastFound{rest: String, name: String}
+  NotCast{}
+
+type QuotePhase is Data:
+  QuoteText{}
+  QuoteName{name: String}
+  QuoteBracedName{name: String}
+  QuoteSkip{depth: U32}
+  QuoteDollarName{name: String}
+  QuoteDollar{}
+  QuoteBrace{}
+  QuoteEscape{}
+  QuoteFinished{}
+
 type Q is Data:
-  Q{mode: U32, line: U32, name: String, vars: String, lit: String, depth: U32}
+  Q{phase: QuotePhase, line: U32, vars: String, lit: String}
+
+type HtmlResult is Data:
+  HtmlEnd{line: U32}
+  PhpTag{rest: String, line: U32}
+  EchoTag{rest: String, line: U32}
+
+type DocStyle is Data:
+  Heredoc{}
+  Nowdoc{}
+
+type DocLabel is Data:
+  DocLabel{rest: String, label: String, style: DocStyle}
+
+type DocPosition is Data:
+  LineStart{}
+  WithinLine{}
+
+type PreviousToken is Data:
+  NoPrevious{}
+  PreviousLine{line: U32}
 
 # Branch on a computed Bool without evaluating the other side.
 def sel(-A: Type, d: Bool, a: Unit -> A, b: Unit -> A) -> A:
@@ -94,17 +134,16 @@ def strip_ns.go(s: String, acc: String) -> String:
 def strip_ns(s: String) -> String:
   strip_ns.go(s, SNil{})
 
-# Inline HTML until an open tag. n: 0 end of input, 1 <?php, 2 <?=
-def html(s: String, +line: U32) -> Cut:
+def html(s: String, +line: U32) -> HtmlResult:
   match s:
     case SNil{}:
-      Cut{SNil{}, line, "", 0}
+      HtmlEnd{line}
     case SCon{'<', SCon{'?', SCon{'=', t}}}:
-      Cut{t, line, "", 2}
+      EchoTag{t, line}
     case SCon{'<', SCon{'?', SCon{'p', SCon{'h', SCon{'p', t}}}}}:
-      Cut{t, line, "", 1}
+      PhpTag{t, line}
     case SCon{'<', SCon{'?', SCon{'P', SCon{'H', SCon{'P', t}}}}}:
-      Cut{t, line, "", 1}
+      PhpTag{t, line}
     case SCon{'\n', t}:
       html(t, (line + 1 : U32))
     case SCon{c, t}:
@@ -114,11 +153,11 @@ def html(s: String, +line: U32) -> Cut:
 def lcomment(s: String, +line: U32, acc: String) -> Cut:
   match s:
     case SNil{}:
-      Cut{SNil{}, line, acc, 0}
+      Cut{SNil{}, line, acc}
     case SCon{'\n', t}:
-      Cut{SCon{'\n', t}, line, acc, 0}
+      Cut{SCon{'\n', t}, line, acc}
     case SCon{'?', SCon{'>', t}}:
-      Cut{SCon{'?', SCon{'>', t}}, line, acc, 0}
+      Cut{SCon{'?', SCon{'>', t}}, line, acc}
     case SCon{c, t}:
       lcomment(t, line, SCon{c, acc})
 
@@ -126,183 +165,157 @@ def lcomment(s: String, +line: U32, acc: String) -> Cut:
 def bcomment(s: String, +line: U32, acc: String) -> Cut:
   match s:
     case SNil{}:
-      Cut{SNil{}, line, acc, 0}
+      Cut{SNil{}, line, acc}
     case SCon{'*', SCon{'/', t}}:
-      Cut{t, line, acc, 0}
+      Cut{t, line, acc}
     case SCon{'\n', t}:
       bcomment(t, (line + 1 : U32), SCon{'\n', acc})
     case SCon{c, t}:
       bcomment(t, line, SCon{c, acc})
 
-def single(s: String, +line: U32, acc: String) -> Cut:
+def single(s: String, +line: U32, acc: String) -> StringCut:
   match s:
     case SNil{}:
-      Cut{SNil{}, line, String.reverse(acc), 0}
+      StringCut{SNil{}, line, LiteralText{String.reverse(acc)}}
     case SCon{'\\', SCon{'\'', t}}:
       single(t, line, SCon{'\'', acc})
     case SCon{'\\', SCon{'\\', t}}:
       single(t, line, SCon{'\\', acc})
     case SCon{'\'', t}:
-      Cut{t, line, String.reverse(acc), 0}
+      StringCut{t, line, LiteralText{String.reverse(acc)}}
     case SCon{'\n', t}:
       single(t, (line + 1 : U32), SCon{'\n', acc})
     case SCon{c, t}:
       single(t, line, SCon{c, acc})
 
-# Interpolation scanner transitions.
 def q.var(name: String, vars: String) -> String:
   String.reverse(name) ++ " " ++ vars
 
-def q.text.ch(+c: Char, +line: U32, name: String, vars: String, lit: String) -> Q:
+def q.text.ch(c: Char, +line: U32, vars: String, lit: String) -> Q:
   match c:
     case '\\':
-      Q{7, line, name, vars, lit, 0}
+      Q{QuoteEscape{}, line, vars, lit}
     case '$':
-      Q{5, line, name, vars, lit, 0}
+      Q{QuoteDollar{}, line, vars, lit}
     case '{':
-      Q{6, line, name, vars, lit, 0}
+      Q{QuoteBrace{}, line, vars, lit}
     case '\n':
-      Q{0, (line + 1 : U32), name, vars, SCon{'\n', lit}, 0}
+      Q{QuoteText{}, (line + 1 : U32), vars, SCon{'\n', lit}}
     case c:
-      Q{0, line, name, vars, SCon{c, lit}, 0}
+      Q{QuoteText{}, line, vars, SCon{c, lit}}
 
-def q.text.go(fin: Bool, +c: Char, +line: U32, name: String, vars: String, lit: String) -> Q:
-  match fin:
-    case True{}:
-      Q{99, line, name, vars, lit, 0}
-    case False{}:
-      q.text.ch(c, line, name, vars, lit)
+def q.terminates(term: QuoteEnd, c: Char) -> Bool:
+  match term:
+    case EndOfInput{}:
+      # Heredoc interpolation historically stops at an embedded NUL as well as EOF.
+      U32.is_eq(code(c), 0)
+    case QuoteCharacter{n}:
+      U32.is_eq(code(c), n)
 
-# The mode-0 transition on c (shared by states that hand a char back to text).
-def q.text(+c: Char, +term: U32, +line: U32, name: String, vars: String, lit: String) -> Q:
-  q.text.go(U32.is_eq(code(c), term), c, line, name, vars, lit)
+def q.text(+c: Char, +term: QuoteEnd, +line: U32, +vars: String, +lit: String) -> Q:
+  sel(Q, q.terminates(term, c), u => Q{QuoteFinished{}, line, vars, lit},
+    u => q.text.ch(c, line, vars, lit))
 
-def q.skip.close(last: Bool, +line: U32, name: String, vars: String, lit: String, +depth: U32) -> Q:
-  match last:
-    case True{}:
-      Q{0, line, name, vars, lit, 0}
-    case False{}:
-      Q{3, line, name, vars, lit, (depth - 1 : U32)}
-
-# Skipping a {...} expression: depth counts open braces.
-def q.skip(+c: Char, +line: U32, name: String, vars: String, lit: String, +depth: U32) -> Q:
+# Brace depth deliberately ignores quoted subexpressions, matching PHP scan tolerance.
+def q.skip(c: Char, +line: U32, +vars: String, +lit: String, +depth: U32) -> Q:
   match c:
     case '}':
-      q.skip.close(U32.is_eq(depth, 1), line, name, vars, lit, depth)
+      sel(Q, U32.is_eq(depth, 1), u => Q{QuoteText{}, line, vars, lit},
+        u => Q{QuoteSkip{(depth - 1 : U32)}, line, vars, lit})
     case '{':
-      Q{3, line, name, vars, lit, (depth + 1 : U32)}
+      Q{QuoteSkip{(depth + 1 : U32)}, line, vars, lit}
     case '\n':
-      Q{3, (line + 1 : U32), name, vars, lit, depth}
+      Q{QuoteSkip{depth}, (line + 1 : U32), vars, lit}
     case _:
-      Q{3, line, name, vars, lit, depth}
+      Q{QuoteSkip{depth}, line, vars, lit}
 
-# In $name: a name char extends it; anything else ends it and is text.
-def q.name(more: Bool, +c: Char, +term: U32, +line: U32, name: String, vars: String, lit: String) -> Q:
-  match more:
-    case True{}:
-      Q{1, line, SCon{c, name}, vars, lit, 0}
-    case False{}:
-      q.text(c, term, line, SNil{}, q.var(name, vars), lit)
+def q.name(+c: Char, +term: QuoteEnd, +line: U32, +name: String, +vars: String, +lit: String) -> Q:
+  sel(Q, is_name_char(c), u => Q{QuoteName{SCon{c, name}}, line, vars, lit},
+    u => q.text(c, term, line, q.var(name, vars), lit))
 
-# In {$name: a name char extends it; anything else ends it, then skip to '}'.
-def q.cname(more: Bool, +c: Char, +line: U32, name: String, vars: String, lit: String) -> Q:
-  match more:
-    case True{}:
-      Q{2, line, SCon{c, name}, vars, lit, 0}
-    case False{}:
-      q.skip(c, line, SNil{}, q.var(name, vars), lit, 1)
+def q.cname(+c: Char, +line: U32, +name: String, +vars: String, +lit: String) -> Q:
+  sel(Q, is_name_char(c), u => Q{QuoteBracedName{SCon{c, name}}, line, vars, lit},
+    u => q.skip(c, line, q.var(name, vars), lit, 1))
 
-# In ${name: '}' ends it; a name char extends it; else skip to '}'.
-def q.dname(more: Bool, +c: Char, +line: U32, name: String, vars: String, lit: String) -> Q:
-  match more:
-    case True{}:
-      Q{4, line, SCon{c, name}, vars, lit, 0}
-    case False{}:
-      q.skip(c, line, SNil{}, q.var(name, vars), lit, 1)
+def q.dname(+c: Char, +line: U32, +name: String, +vars: String, +lit: String) -> Q:
+  sel(Q, is_name_char(c), u => Q{QuoteDollarName{SCon{c, name}}, line, vars, lit},
+    u => q.skip(c, line, q.var(name, vars), lit, 1))
 
-def q.dollar.brace(+c: Char, +term: U32, +line: U32, name: String, vars: String, lit: String) -> Q:
+def q.dollar.brace(c: Char, +term: QuoteEnd, +line: U32, +vars: String, +lit: String) -> Q:
   match c:
     case '{':
-      Q{4, line, SNil{}, vars, lit, 0}
+      Q{QuoteDollarName{SNil{}}, line, vars, lit}
     case c:
-      q.text(c, term, line, name, vars, SCon{'$', lit})
+      q.text(c, term, line, vars, SCon{'$', lit})
 
-# After '$': a name start opens $name, '{' opens ${name}, else '$' is text.
-def q.dollar(start: Bool, +c: Char, +term: U32, +line: U32, name: String, vars: String, lit: String) -> Q:
-  match start:
-    case True{}:
-      Q{1, line, SCon{c, SNil{}}, vars, lit, 0}
-    case False{}:
-      q.dollar.brace(c, term, line, name, vars, lit)
+def q.dollar(+c: Char, +term: QuoteEnd, +line: U32, +vars: String, +lit: String) -> Q:
+  sel(Q, is_name_start(c), u => Q{QuoteName{SCon{c, SNil{}}}, line, vars, lit},
+    u => q.dollar.brace(c, term, line, vars, lit))
 
-# After '{': '$' opens {$name, else '{' is text.
-def q.brace(+c: Char, +term: U32, +line: U32, name: String, vars: String, lit: String) -> Q:
+def q.brace(c: Char, +term: QuoteEnd, +line: U32, +vars: String, +lit: String) -> Q:
   match c:
     case '$':
-      Q{2, line, SNil{}, vars, lit, 0}
+      Q{QuoteBracedName{SNil{}}, line, vars, lit}
     case c:
-      q.text(c, term, line, name, vars, SCon{'{', lit})
+      q.text(c, term, line, vars, SCon{'{', lit})
 
-def q.step(q: Q, +c: Char, +term: U32) -> Q:
+def q.step(q: Q, +c: Char, +term: QuoteEnd) -> Q:
   match q:
-    case Q{0, line, name, vars, lit, d}:
-      q.text(c, term, line, name, vars, lit)
-    case Q{1, line, name, vars, lit, d}:
-      q.name(is_name_char(c), c, term, line, name, vars, lit)
-    case Q{2, line, name, vars, lit, d}:
-      q.cname(is_name_char(c), c, line, name, vars, lit)
-    case Q{3, line, name, vars, lit, d}:
-      q.skip(c, line, name, vars, lit, d)
-    case Q{4, line, name, vars, lit, d}:
-      q.dname(is_name_char(c), c, line, name, vars, lit)
-    case Q{5, line, name, vars, lit, d}:
-      q.dollar(is_name_start(c), c, term, line, name, vars, lit)
-    case Q{6, line, name, vars, lit, d}:
-      q.brace(c, term, line, name, vars, lit)
-    case Q{7, line, name, vars, lit, d}:
-      Q{0, (line + nl(c) : U32), name, vars, SCon{c, lit}, 0}
-    case Q{m, line, name, vars, lit, d}:
-      Q{m, line, name, vars, lit, d}
+    case Q{QuoteText{}, line, vars, lit}:
+      q.text(c, term, line, vars, lit)
+    case Q{QuoteName{name}, line, vars, lit}:
+      q.name(c, term, line, name, vars, lit)
+    case Q{QuoteBracedName{name}, line, vars, lit}:
+      q.cname(c, line, name, vars, lit)
+    case Q{QuoteSkip{depth}, line, vars, lit}:
+      q.skip(c, line, vars, lit, depth)
+    case Q{QuoteDollarName{name}, line, vars, lit}:
+      q.dname(c, line, name, vars, lit)
+    case Q{QuoteDollar{}, line, vars, lit}:
+      q.dollar(c, term, line, vars, lit)
+    case Q{QuoteBrace{}, line, vars, lit}:
+      q.brace(c, term, line, vars, lit)
+    case Q{QuoteEscape{}, line, vars, lit}:
+      Q{QuoteText{}, (line + nl(c) : U32), vars, SCon{c, lit}}
+    case Q{QuoteFinished{}, line, vars, lit}:
+      Q{QuoteFinished{}, line, vars, lit}
 
-# Close the scan: n = 1 when any variable was interpolated. text is the
-# variable list when n = 1, else the literal contents.
-def q.done(rest: String, q: Q) -> Cut:
+def q.done(rest: String, q: Q) -> StringCut:
   match q:
-    case Q{1, line, name, vars, lit, d}:
-      Cut{rest, line, q.var(name, vars), 1}
-    case Q{m, line, name, SNil{}, lit, d}:
-      Cut{rest, line, String.reverse(lit), 0}
-    case Q{m, line, name, vars, lit, d}:
-      Cut{rest, line, vars, 1}
+    case Q{QuoteName{name}, line, vars, lit}:
+      StringCut{rest, line, InterpolatedNames{q.var(name, vars)}}
+    case Q{phase, line, SNil{}, lit}:
+      StringCut{rest, line, LiteralText{String.reverse(lit)}}
+    case Q{phase, line, vars, lit}:
+      StringCut{rest, line, InterpolatedNames{vars}}
 
-# Scan an interpolating string up to the char with code term (0: to the end).
-def interp(s: String, +term: U32, q: Q) -> Cut:
+def interp(s: String, +term: QuoteEnd, q: Q) -> StringCut:
   match s q:
-    case s Q{99, line, name, vars, lit, d}:
-      q.done(s, Q{99, line, name, vars, lit, d})
+    case s Q{QuoteFinished{}, line, vars, lit}:
+      q.done(s, Q{QuoteFinished{}, line, vars, lit})
     case SNil{} q:
       q.done(SNil{}, q)
     case SCon{+c, t} q:
       interp(t, term, q.step(q, c, term))
 
-def interp.start(s: String, +term: U32, +line: U32) -> Cut:
-  interp(s, term, Q{0, line, SNil{}, SNil{}, SNil{}, 0})
+def interp.start(s: String, +term: QuoteEnd, +line: U32) -> StringCut:
+  interp(s, term, Q{QuoteText{}, line, SNil{}, SNil{}})
 
 # Read identifier chars (id: include '\'). text is in order.
 def word(s: String, +id: Bool, +acc: String) -> Cut:
   match s:
     case SNil{}:
-      Cut{SNil{}, 0, String.reverse(acc), 0}
+      Cut{SNil{}, 0, String.reverse(acc)}
     case SCon{+c, +t}:
-      sel(Cut, (id && is_id_char(c)) || is_name_char(c), u => word(t, id, SCon{c, acc}), u => Cut{SCon{c, t}, 0, String.reverse(acc), 0})
+      sel(Cut, (id && is_id_char(c)) || is_name_char(c), u => word(t, id, SCon{c, acc}), u => Cut{SCon{c, t}, 0, String.reverse(acc)})
 
 # Number literal: digits, letters, '_' and '.' (covers hex, floats, 1e5).
 def number(s: String, +acc: String) -> Cut:
   match s:
     case SNil{}:
-      Cut{SNil{}, 0, String.reverse(acc), 0}
+      Cut{SNil{}, 0, String.reverse(acc)}
     case SCon{+c, +t}:
-      sel(Cut, is_name_char(c) || U32.is_eq(code(c), 46), u => number(t, SCon{c, acc}), u => Cut{SCon{c, t}, 0, String.reverse(acc), 0})
+      sel(Cut, is_name_char(c) || U32.is_eq(code(c), 46), u => number(t, SCon{c, acc}), u => Cut{SCon{c, t}, 0, String.reverse(acc)})
 
 def skip_hws(s: String) -> String:
   match s:
@@ -357,20 +370,19 @@ def is_cast(s: String) -> Bool:
     case _:
       False{}
 
-def cast.close(+name: String, s: String) -> Cut:
+def cast.close(+name: String, s: String) -> CastProbe:
   match s:
-    case SCon{')', t}:
-      Cut{t, 0, name, Bool.to_u32(is_cast(name))}
+    case SCon{')', +t}:
+      sel(CastProbe, is_cast(name), u => CastFound{t, name}, u => NotCast{})
     case _:
-      Cut{SNil{}, 0, "", 0}
+      NotCast{}
 
-def cast.word(w: Cut) -> Cut:
+def cast.word(w: Cut) -> CastProbe:
   match w:
-    case Cut{rest, l, name, n}:
+    case Cut{rest, l, name}:
       cast.close(String.to_lower(name), skip_hws(rest))
 
-# After '(': ( spaces* name spaces* ). n = 1 when it is a cast.
-def cast(s: String) -> Cut:
+def cast(s: String) -> CastProbe:
   cast.word(word(skip_hws(s), False{}, SNil{}))
 
 def hd.after_ok(s: String) -> Bool:
@@ -389,12 +401,28 @@ def hd.rest(s: String, +label: String) -> String:
   String.drop(skip_hws(s), String.length(label))
 
 # Heredoc body: raw text up to the closing label line.
-def hd.body(s: String, +label: String, +line: U32, +acc: String, +bol: Bool) -> Cut:
+def hd.position(c: Char) -> DocPosition:
+  match c:
+    case '\n':
+      LineStart{}
+    case _:
+      WithinLine{}
+
+def hd.at_start(position: DocPosition, s: String, label: String) -> Bool:
+  match position:
+    case LineStart{}:
+      hd.closes(s, label)
+    case WithinLine{}:
+      False{}
+
+def hd.body(s: String, +label: String, +line: U32, +acc: String, position: DocPosition) -> Cut:
   match s:
     case SNil{}:
-      Cut{SNil{}, line, String.reverse(acc), 0}
+      Cut{SNil{}, line, String.reverse(acc)}
     case SCon{+c, +t}:
-      sel(Cut, bol && hd.closes(SCon{c, t}, label), u => Cut{hd.rest(SCon{c, t}, label), line, String.reverse(acc), 0}, u => hd.body(t, label, (line + nl(c) : U32), SCon{c, acc}, U32.is_eq(nl(c), 1)))
+      sel(Cut, hd.at_start(position, SCon{c, t}, label),
+        u => Cut{hd.rest(SCon{c, t}, label), line, String.reverse(acc)},
+        u => hd.body(t, label, (line + nl(c) : U32), SCon{c, acc}, hd.position(c)))
 
 # Skip to the end of the heredoc's opening line.
 def to_eol(s: String) -> String:
@@ -406,42 +434,55 @@ def to_eol(s: String) -> String:
     case SCon{c, t}:
       to_eol(t)
 
-def hd.label.fin(w: Cut, +n: U32) -> Cut:
+def hd.label.fin(w: Cut, style: DocStyle) -> DocLabel:
   match w:
-    case Cut{rest, l, name, k}:
-      Cut{to_eol(rest), 0, name, n}
+    case Cut{rest, l, name}:
+      DocLabel{to_eol(rest), name, style}
 
-# n: 0 heredoc (interpolates), 1 nowdoc
-def hd.label(s: String) -> Cut:
+def hd.label(s: String) -> DocLabel:
   match s:
     case SCon{'\'', t}:
-      hd.label.fin(word(t, False{}, SNil{}), 1)
+      hd.label.fin(word(t, False{}, SNil{}), Nowdoc{})
     case SCon{'"', t}:
-      hd.label.fin(word(t, False{}, SNil{}), 0)
+      hd.label.fin(word(t, False{}, SNil{}), Heredoc{})
     case s:
-      hd.label.fin(word(s, False{}, SNil{}), 0)
+      hd.label.fin(word(s, False{}, SNil{}), Heredoc{})
 
-def hd.interp(rest: String, +line2: U32, +line: U32, c: Cut) -> Step:
+def string.kind(contents: StringContents, +line: U32) -> Tok:
+  match contents:
+    case LiteralText{text}:
+      tok(2, text, line)
+    case InterpolatedNames{names}:
+      tok(3, names, line)
+
+def string.text(contents: StringContents) -> String:
+  match contents:
+    case LiteralText{text}:
+      text
+    case InterpolatedNames{names}:
+      names
+
+def hd.interp(rest: String, +line2: U32, +line: U32, c: StringCut) -> Step:
   match c:
-    case Cut{r, l, text, n}:
-      Step{rest, line2, [tok((2 + n : U32), text, line)]}
+    case StringCut{r, l, contents}:
+      Step{rest, line2, [string.kind(contents, line)]}
 
-def hd.tok(+nowdoc: U32, rest: String, +line2: U32, +line: U32, body: String) -> Step:
-  match nowdoc:
-    case 1:
+def hd.tok(style: DocStyle, rest: String, +line2: U32, +line: U32, body: String) -> Step:
+  match style:
+    case Nowdoc{}:
       Step{rest, line2, [tok(2, body, line)]}
-    case _:
-      hd.interp(rest, line2, line, interp.start(body, 0, line))
+    case Heredoc{}:
+      hd.interp(rest, line2, line, interp.start(body, EndOfInput{}, line))
 
-def hd.body.fin(+nowdoc: U32, +line: U32, b: Cut) -> Step:
+def hd.body.fin(style: DocStyle, +line: U32, b: Cut) -> Step:
   match b:
-    case Cut{rest, line2, body, k}:
-      hd.tok(nowdoc, rest, line2, line, body)
+    case Cut{rest, line2, body}:
+      hd.tok(style, rest, line2, line, body)
 
-def heredoc.go(c: Cut, +line: U32) -> Step:
+def heredoc.go(c: DocLabel, +line: U32) -> Step:
   match c:
-    case Cut{rest, l, label, nowdoc}:
-      hd.body.fin(nowdoc, line, hd.body(rest, label, (line + 1 : U32), SNil{}, True{}))
+    case DocLabel{rest, label, style}:
+      hd.body.fin(style, line, hd.body(rest, label, (line + 1 : U32), SNil{}, LineStart{}))
 
 def heredoc(s: String, +line: U32) -> Step:
   heredoc.go(hd.label(skip_hws(s)), line)
@@ -456,31 +497,33 @@ def comment.ign(ign: Bool, rest: String, +line: U32, +line2: U32) -> Step:
 # A comment becomes an IGN token when it says phpscan-ignore.
 def comment(c: Cut, +line: U32) -> Step:
   match c:
-    case Cut{rest, l, text, n}:
+    case Cut{rest, l, text}:
       comment.ign(String.contains(text, "erongi-nacsphp"), rest, line, l)
 
-def string.tok(+line: U32, c: Cut) -> Step:
+def string.tok(+line: U32, c: StringCut) -> Step:
   match c:
-    case Cut{rest, l, text, n}:
-      Step{rest, l, [tok((2 + n : U32), text, line)]}
+    case StringCut{rest, l, contents}:
+      Step{rest, l, [string.kind(contents, line)]}
 
-def btick.tok(+line: U32, c: Cut) -> Step:
+def btick.tok(+line: U32, c: StringCut) -> Step:
   match c:
-    case Cut{rest, l, text, n}:
-      Step{rest, l, [tok(7, text, line)]}
+    case StringCut{rest, l, contents}:
+      Step{rest, l, [tok(7, string.text(contents), line)]}
 
-def close_tag(c: Cut, +line: U32) -> Step:
+def close_tag(c: HtmlResult, +line: U32) -> Step:
   match c:
-    case Cut{rest, +l, text, 2}:
+    case EchoTag{rest, +l}:
       Step{rest, l, [op(";", line), tok(1, "echo", l)]}
-    case Cut{rest, l, text, n}:
+    case PhpTag{rest, l}:
       Step{rest, l, [op(";", line)]}
+    case HtmlEnd{l}:
+      Step{SNil{}, l, [op(";", line)]}
 
-def paren.go(c: Cut, s: String, +line: U32) -> Step:
+def paren.go(c: CastProbe, s: String, +line: U32) -> Step:
   match c:
-    case Cut{rest, l, name, 1}:
+    case CastFound{rest, name}:
       Step{rest, line, [tok(6, name, line)]}
-    case Cut{rest, l, name, n}:
+    case NotCast{}:
       Step{s, line, [op("(", line)]}
 
 def paren(+s: String, +line: U32) -> Step:
@@ -488,7 +531,7 @@ def paren(+s: String, +line: U32) -> Step:
 
 def var.tok(w: Cut, +line: U32) -> Step:
   match w:
-    case Cut{rest, l, name, n}:
+    case Cut{rest, l, name}:
       Step{rest, line, [tok(0, name, line)]}
 
 def dollar(start: Bool, s: String, +line: U32) -> Step:
@@ -500,12 +543,12 @@ def dollar(start: Bool, s: String, +line: U32) -> Step:
 
 def ident.tok(w: Cut, +line: U32) -> Step:
   match w:
-    case Cut{rest, l, name, n}:
+    case Cut{rest, l, name}:
       Step{rest, line, [tok(1, strip_ns(String.to_lower(name)), line)]}
 
 def num.tok(w: Cut, +line: U32) -> Step:
   match w:
-    case Cut{rest, l, text, n}:
+    case Cut{rest, l, text}:
       Step{rest, line, [tok(4, text, line)]}
 
 # Operators, longest first.
@@ -553,9 +596,9 @@ def step(s: String, +line: U32) -> Step:
     case SCon{'\'', t}:
       string.tok(line, single(t, line, SNil{}))
     case SCon{'"', t}:
-      string.tok(line, interp.start(t, 34, line))
+      string.tok(line, interp.start(t, QuoteCharacter{34}, line))
     case SCon{'`', t}:
-      btick.tok(line, interp.start(t, 96, line))
+      btick.tok(line, interp.start(t, QuoteCharacter{96}, line))
     case SCon{'<', SCon{'<', SCon{'<', t}}}:
       heredoc(t, line)
     case SCon{'$', SCon{+c, t}}:
@@ -564,13 +607,6 @@ def step(s: String, +line: U32) -> Step:
       paren(t, line)
     case SCon{c, t}:
       other(c, t, line)
-
-def lex.start(+n: U32, +line: U32) -> List<&2, Tok>:
-  match n:
-    case 2:
-      [tok(1, "echo", line)]
-    case _:
-      []
 
 # Prepend ts reversed (the accumulator is newest first).
 def push(ts: List<&2, Tok>, acc: List<&2, Tok>) -> List<&2, Tok>:
@@ -589,10 +625,14 @@ def lex.go(fuel: Nat, st: Step, acc: List<&2, Tok>) -> List<&2, Tok>:
     case 1n+p Step{r, l, ts}:
       lex.go(p, step(r, l), push(ts, acc))
 
-def lex.begin(c: Cut) -> List<&2, Tok>:
+def lex.begin(c: HtmlResult) -> List<&2, Tok>:
   match c:
-    case Cut{+rest, +line, text, n}:
-      lex.go(String.length(rest), Step{rest, line, lex.start(n, line)}, [])
+    case HtmlEnd{line}:
+      []
+    case PhpTag{+rest, +line}:
+      lex.go(String.length(rest), Step{rest, line, []}, [])
+    case EchoTag{+rest, +line}:
+      lex.go(String.length(rest), Step{rest, line, [tok(1, "echo", line)]}, [])
 
 def without_ignores(ts: List<&2, Tok>) -> List<&2, Tok>:
   match ts:
@@ -603,18 +643,31 @@ def without_ignores(ts: List<&2, Tok>) -> List<&2, Tok>:
     case Con{t, rest}:
       Con{t, without_ignores(rest)}
 
-def ignored_lines(ts: List<&2, Tok>, +last: U32) -> List<&2, U32>:
+def ignored.same(previous: PreviousToken, +line: U32) -> Bool:
+  match previous:
+    case NoPrevious{}:
+      # Preserve synthetic line-zero directives accepted by the original fresh entry.
+      U32.is_eq(line, 0)
+    case PreviousLine{last}:
+      U32.is_eq(line, last)
+
+def ignored_lines.go(ts: List<&2, Tok>, +previous: PreviousToken) -> List<&2, U32>:
   match ts:
     case Nil{}:
       []
     case Con{Tok{8, s, +l}, +rest}:
-      sel(List<&2, U32>, U32.is_eq(l, last), u => Con{l, ignored_lines(rest, last)}, u => Con{U32.add(l, 1), ignored_lines(rest, last)})
+      sel(List<&2, U32>, ignored.same(previous, l),
+        u => Con{l, ignored_lines.go(rest, previous)},
+        u => Con{U32.add(l, 1), ignored_lines.go(rest, previous)})
     case Con{Tok{k, s, +l}, rest}:
-      ignored_lines(rest, l)
+      ignored_lines.go(rest, PreviousLine{l})
+
+def ignored_lines(ts: List<&2, Tok>) -> List<&2, U32>:
+  ignored_lines.go(ts, NoPrevious{})
 
 def qualified.ident(w: Cut, +line: U32) -> Step:
   match w:
-    case Cut{rest, l, name, n}:
+    case Cut{rest, l, name}:
       Step{rest, line, [tok(1, String.to_lower(name), line)]}
 
 def qualified.string.raw(s: String) -> Bool:
@@ -666,10 +719,14 @@ def qualified.go(fuel: Nat, st: Step, acc: List<&2, Tok>) -> List<&2, Tok>:
     case 1n+p Step{r, l, ts}:
       qualified.go(p, qualified.step(r, l), push(ts, acc))
 
-def qualified.begin(c: Cut) -> List<&2, Tok>:
+def qualified.begin(c: HtmlResult) -> List<&2, Tok>:
   match c:
-    case Cut{+rest, +line, text, n}:
-      qualified.go(String.length(rest), Step{rest, line, lex.start(n, line)}, [])
+    case HtmlEnd{line}:
+      []
+    case PhpTag{+rest, +line}:
+      qualified.go(String.length(rest), Step{rest, line, []}, [])
+    case EchoTag{+rest, +line}:
+      qualified.go(String.length(rest), Step{rest, line, [tok(1, "echo", line)]}, [])
 
 def qualified(src: String) -> List<&2, Tok>:
   List.reverse(&2, Tok, qualified.begin(html(src, 1)))

@@ -78,6 +78,15 @@ def hex4(s: String) -> Maybe<&2, CodeRest>:
     case _:
       None{}
 
+type UnicodePhase is Data:
+  ScalarUnit{code: U32}
+  HighSurrogate{high: U32}
+  InvalidSurrogate{}
+
+def unicode.phase(+n: U32) -> UnicodePhase:
+  L.sel(UnicodePhase, U32.is_le(55296, n) && U32.is_le(n, 56319), u => HighSurrogate{n},
+    u => L.sel(UnicodePhase, U32.is_le(56320, n) && U32.is_le(n, 57343), v => InvalidSurrogate{}, v => ScalarUnit{n}))
+
 def surrogate(+hi: U32, s: String) -> Maybe<&2, CodeRest>:
   match s:
     case SCon{'\\', SCon{'u', rest}}:
@@ -88,9 +97,14 @@ def surrogate(+hi: U32, s: String) -> Maybe<&2, CodeRest>:
     case _:
       None{}
 
-def unicode(+n: U32, +s: String) -> Maybe<&2, CodeRest>:
-  L.sel(Maybe<&2, CodeRest>, U32.is_le(55296, n) && U32.is_le(n, 56319), u => surrogate(n, s),
-    u => L.sel(Maybe<&2, CodeRest>, U32.is_le(56320, n) && U32.is_le(n, 57343), v => None{}, v => Some{CodeRest{n, s}}))
+def unicode(phase: UnicodePhase, s: String) -> Maybe<&2, CodeRest>:
+  match phase:
+    case ScalarUnit{n}:
+      Some{CodeRest{n, s}}
+    case HighSurrogate{hi}:
+      surrogate(hi, s)
+    case InvalidSurrogate{}:
+      None{}
 
 def escaped(c: Char) -> Maybe<&2, Char>:
   match c:
@@ -119,7 +133,7 @@ def quoted(fuel: Nat, s: String, acc: List<&2, Char>) -> Maybe<&2, StringRest>:
       Some{StringRest{String.from_list(List.reverse(&2, Char, acc)), rest}}
     case 1n+p SCon{'\\', SCon{'u', rest}}:
       Maybe.bind(&2, CodeRest, StringRest, hex4(rest), +r =>
-        Maybe.bind(&2, CodeRest, StringRest, unicode(code(r), code.rest(r)), +d =>
+        Maybe.bind(&2, CodeRest, StringRest, unicode(unicode.phase(code(r)), code.rest(r)), +d =>
           quoted(p, code.rest(d), Con{Char.from_u32(code(d)), acc})))
     case 1n+p SCon{'\\', SCon{c, rest}}:
       do Maybe<&2, StringRest>:
@@ -138,51 +152,115 @@ def raw(s: String, +acc: List<&2, Char>) -> StringRest:
       L.sel(StringRest, space(c) || punct(c),
         u => StringRest{String.from_list(List.reverse(&2, Char, acc)), SCon{c, rest}}, u => raw(rest, Con{c, acc}))
 
-def number(s: String, +state: U32) -> Bool:
+type NumberPhase is Data:
+  NumberStart{}
+  NumberMinus{}
+  NumberZero{}
+  NumberInteger{}
+  NumberPoint{}
+  NumberFraction{}
+  NumberExponent{}
+  NumberSign{}
+  NumberDigits{}
+  NumberDead{}
+
+def number.accept(phase: NumberPhase) -> Bool:
+  match phase:
+    case NumberZero{}:
+      True{}
+    case NumberInteger{}:
+      True{}
+    case NumberFraction{}:
+      True{}
+    case NumberDigits{}:
+      True{}
+    case _:
+      False{}
+
+def number.first(+c: Char) -> NumberPhase:
+  L.sel(NumberPhase, Char.is_eq(c, '0'), u => NumberZero{},
+    u => L.sel(NumberPhase, Char.is_digit(c), v => NumberInteger{}, v => NumberDead{}))
+
+def number.tail(+c: Char) -> NumberPhase:
+  L.sel(NumberPhase, Char.is_eq(c, '.'), u => NumberPoint{},
+    u => L.sel(NumberPhase, Char.is_eq(c, 'e') || Char.is_eq(c, 'E'), v => NumberExponent{}, v => NumberDead{}))
+
+def number.step(phase: NumberPhase, +c: Char) -> NumberPhase:
+  match phase:
+    case NumberStart{}:
+      L.sel(NumberPhase, Char.is_eq(c, '-'), u => NumberMinus{}, u => number.first(c))
+    case NumberMinus{}:
+      number.first(c)
+    case NumberZero{}:
+      number.tail(c)
+    case NumberInteger{}:
+      L.sel(NumberPhase, Char.is_digit(c), u => NumberInteger{}, u => number.tail(c))
+    case NumberPoint{}:
+      L.sel(NumberPhase, Char.is_digit(c), u => NumberFraction{}, u => NumberDead{})
+    case NumberFraction{}:
+      L.sel(NumberPhase, Char.is_digit(c), u => NumberFraction{},
+        u => L.sel(NumberPhase, Char.is_eq(c, 'e') || Char.is_eq(c, 'E'), v => NumberExponent{}, v => NumberDead{}))
+    case NumberExponent{}:
+      L.sel(NumberPhase, Char.is_eq(c, '+') || Char.is_eq(c, '-'), u => NumberSign{},
+        u => L.sel(NumberPhase, Char.is_digit(c), v => NumberDigits{}, v => NumberDead{}))
+    case NumberSign{}:
+      L.sel(NumberPhase, Char.is_digit(c), u => NumberDigits{}, u => NumberDead{})
+    case NumberDigits{}:
+      L.sel(NumberPhase, Char.is_digit(c), u => NumberDigits{}, u => NumberDead{})
+    case NumberDead{}:
+      NumberDead{}
+
+def number(s: String, phase: NumberPhase) -> Bool:
   match s:
     case SNil{}:
-      U32.is_eq(state, 2) || U32.is_eq(state, 3) || U32.is_eq(state, 5) || U32.is_eq(state, 8)
-    case SCon{+c, rest}:
-      +digit = Char.is_digit(c)
-      +nonzero = digit && Bool.not(Char.is_eq(c, '0'))
-      +exp = Char.is_eq(c, 'e') || Char.is_eq(c, 'E')
-      +sign = Char.is_eq(c, '+') || Char.is_eq(c, '-')
-      next = L.sel(U32, U32.is_eq(state, 0) && Char.is_eq(c, '-'), u => 1,
-        u => L.sel(U32, (U32.is_eq(state, 0) || U32.is_eq(state, 1)) && Char.is_eq(c, '0'), v => 2,
-          v => L.sel(U32, (U32.is_eq(state, 0) || U32.is_eq(state, 1) || U32.is_eq(state, 3)) && nonzero, w => 3,
-            w => L.sel(U32, U32.is_eq(state, 3) && digit, x => 3,
-              x => L.sel(U32, (U32.is_eq(state, 2) || U32.is_eq(state, 3)) && Char.is_eq(c, '.'), y => 4,
-                y => L.sel(U32, (U32.is_eq(state, 4) || U32.is_eq(state, 5)) && digit, z => 5,
-                  z => L.sel(U32, (U32.is_eq(state, 2) || U32.is_eq(state, 3) || U32.is_eq(state, 5)) && exp, a => 6,
-                    a => L.sel(U32, U32.is_eq(state, 6) && sign, b => 7,
-                      b => L.sel(U32, (U32.is_eq(state, 6) || U32.is_eq(state, 7) || U32.is_eq(state, 8)) && digit, d => 8, d => 99)))))))))
-      number(rest, next)
+      number.accept(phase)
+    case SCon{c, rest}:
+      number(rest, number.step(phase, c))
 
-def lex(fuel: Nat, s: String, +line: U32) -> Maybe<&2, List<&2, Token>>:
-  match fuel s:
-    case 1n+p SNil{}:
+type TokenPhase is Data:
+  TokenEnd{}
+  TokenSpace{char: Char, rest: String}
+  TokenPunctuation{char: Char, rest: String}
+  TokenQuoted{rest: String}
+  TokenRaw{source: String}
+
+def token.phase(s: String) -> TokenPhase:
+  match s:
+    case SNil{}:
+      TokenEnd{}
+    case SCon{'"', rest}:
+      TokenQuoted{rest}
+    case SCon{+c, +rest}:
+      L.sel(TokenPhase, space(c), u => TokenSpace{c, rest},
+        u => L.sel(TokenPhase, punct(c), v => TokenPunctuation{c, rest}, v => TokenRaw{SCon{c, rest}}))
+
+def lex.phase(fuel: Nat, phase: TokenPhase, +line: U32) -> Maybe<&2, List<&2, Token>>:
+  match fuel phase:
+    case 1n+p TokenEnd{}:
       Some{[]}
-    case 1n+(+p) SCon{'"', rest}:
+    case 1n+(+p) TokenQuoted{rest}:
       Maybe.bind(&2, StringRest, List<&2, Token>, quoted(p, rest, []), +r =>
         do Maybe<&2, List<&2, Token>>:
-          tokens : List<&2, Token> <- lex(p, text.rest(r), line)
+          tokens : List<&2, Token> <- lex.phase(p, token.phase(text.rest(r)), line)
           return Con{Quoted{line, text(r)}, tokens})
-    case 1n+(+p) SCon{+c, +rest}:
-      L.sel(Maybe<&2, List<&2, Token>>, space(c),
-        u => lex(p, rest, L.sel(U32, Char.is_eq(c, '\n'), v => U32.add(line, 1), v => line)),
-        u => L.sel(Maybe<&2, List<&2, Token>>, punct(c),
-          v => do Maybe<&2, List<&2, Token>>:
-            tokens : List<&2, Token> <- lex(p, rest, line)
-            return Con{Punct{SCon{c, SNil{}}}, tokens},
-          v => (
-            +r = raw(SCon{c, rest}, [])
-            +t = text(r)
-            L.sel(Maybe<&2, List<&2, Token>>, String.eq(t, "true") || String.eq(t, "false") || String.eq(t, "null") || number(t, 0),
-              w => do Maybe<&2, List<&2, Token>>:
-                tokens : List<&2, Token> <- lex(p, text.rest(r), line)
-                return Con{Literal{}, tokens}, w => None{}))))
+    case 1n+p TokenSpace{+c, rest}:
+      lex.phase(p, token.phase(rest), L.sel(U32, Char.is_eq(c, '\n'), v => U32.add(line, 1), v => line))
+    case 1n+p TokenPunctuation{c, rest}:
+      do Maybe<&2, List<&2, Token>>:
+        tokens : List<&2, Token> <- lex.phase(p, token.phase(rest), line)
+        return Con{Punct{SCon{c, SNil{}}}, tokens}
+    case 1n+p TokenRaw{source}:
+      +r = raw(source, [])
+      +t = text(r)
+      L.sel(Maybe<&2, List<&2, Token>>, String.eq(t, "true") || String.eq(t, "false") || String.eq(t, "null") || number(t, NumberStart{}),
+        w => do Maybe<&2, List<&2, Token>>:
+          tokens : List<&2, Token> <- lex.phase(p, token.phase(text.rest(r)), line)
+          return Con{Literal{}, tokens}, w => None{})
     case _ _:
       None{}
+
+def lex(fuel: Nat, s: String, +line: U32) -> Maybe<&2, List<&2, Token>>:
+  lex.phase(fuel, token.phase(s), line)
 
 def has(fields: List<&2, Field>, +key: String) -> Bool:
   match fields:
@@ -191,39 +269,47 @@ def has(fields: List<&2, Field>, +key: String) -> Bool:
     case Con{Field{name, v}, rest}:
       String.eq(name, key) || has(rest, key)
 
-def parse(fuel: Nat, mode: U32, ts: List<&2, Token>, acc: Value) -> Maybe<&2, Parsed>:
-  match fuel mode ts acc:
-    case 1n+p 0 Con{Quoted{line, v}, rest} _:
+type ParsePhase is Data:
+  ParseValue{}
+  ArrayStart{values: List<&2, Value>}
+  ArrayNext{values: List<&2, Value>}
+  ObjectStart{fields: List<&2, Field>}
+  ObjectNext{fields: List<&2, Field>}
+  ObjectKey{fields: List<&2, Field>}
+
+def parse(fuel: Nat, phase: ParsePhase, ts: List<&2, Token>) -> Maybe<&2, Parsed>:
+  match fuel phase ts:
+    case 1n+p ParseValue{} Con{Quoted{line, v}, rest}:
       Some{Parsed{Str{line, v}, rest}}
-    case 1n+p 0 Con{Literal{}, rest} _:
+    case 1n+p ParseValue{} Con{Literal{}, rest}:
       Some{Parsed{Other{}, rest}}
-    case 1n+p 0 Con{Punct{"["}, rest} _:
-      parse(p, 1, rest, Array{[]})
-    case 1n+p 0 Con{Punct{"{"}, rest} _:
-      parse(p, 3, rest, Object{[]})
-    case 1n+p 1 Con{Punct{"]"}, rest} Array{values}:
+    case 1n+p ParseValue{} Con{Punct{"["}, rest}:
+      parse(p, ArrayStart{[]}, rest)
+    case 1n+p ParseValue{} Con{Punct{"{"}, rest}:
+      parse(p, ObjectStart{[]}, rest)
+    case 1n+p ArrayStart{values} Con{Punct{"]"}, rest}:
       Some{Parsed{Array{List.reverse(&2, Value, values)}, rest}}
-    case 1n+(+p) 1 +tokens Array{values}:
-      Maybe.bind(&2, Parsed, Parsed, parse(p, 0, tokens, Other{}), +r =>
-        parse(p, 2, value.rest(r), Array{Con{value(r), values}}))
-    case 1n+p 2 Con{Punct{"]"}, rest} Array{values}:
+    case 1n+(+p) ArrayStart{values} +tokens:
+      Maybe.bind(&2, Parsed, Parsed, parse(p, ParseValue{}, tokens), +r =>
+        parse(p, ArrayNext{Con{value(r), values}}, value.rest(r)))
+    case 1n+p ArrayNext{values} Con{Punct{"]"}, rest}:
       Some{Parsed{Array{List.reverse(&2, Value, values)}, rest}}
-    case 1n+(+p) 2 Con{Punct{","}, rest} Array{values}:
-      Maybe.bind(&2, Parsed, Parsed, parse(p, 0, rest, Other{}), +r =>
-        parse(p, 2, value.rest(r), Array{Con{value(r), values}}))
-    case 1n+p 3 Con{Punct{"}"}, rest} Object{fields}:
+    case 1n+(+p) ArrayNext{values} Con{Punct{","}, rest}:
+      Maybe.bind(&2, Parsed, Parsed, parse(p, ParseValue{}, rest), +r =>
+        parse(p, ArrayNext{Con{value(r), values}}, value.rest(r)))
+    case 1n+p ObjectStart{fields} Con{Punct{"}"}, rest}:
       Some{Parsed{Object{List.reverse(&2, Field, fields)}, rest}}
-    case 1n+p 3 +tokens Object{fields}:
-      parse(p, 5, tokens, Object{fields})
-    case 1n+p 4 Con{Punct{"}"}, rest} Object{fields}:
+    case 1n+p ObjectStart{fields} tokens:
+      parse(p, ObjectKey{fields}, tokens)
+    case 1n+p ObjectNext{fields} Con{Punct{"}"}, rest}:
       Some{Parsed{Object{List.reverse(&2, Field, fields)}, rest}}
-    case 1n+p 4 Con{Punct{","}, rest} Object{fields}:
-      parse(p, 5, rest, Object{fields})
-    case 1n+(+p) 5 Con{Quoted{line, +key}, Con{Punct{":"}, rest}} Object{+fields}:
+    case 1n+p ObjectNext{fields} Con{Punct{","}, rest}:
+      parse(p, ObjectKey{fields}, rest)
+    case 1n+(+p) ObjectKey{+fields} Con{Quoted{line, +key}, Con{Punct{":"}, rest}}:
       L.sel(Maybe<&2, Parsed>, has(fields, key), u => None{},
-        u => Maybe.bind(&2, Parsed, Parsed, parse(p, 0, rest, Other{}), +r =>
-          parse(p, 4, value.rest(r), Object{Con{Field{key, value(r)}, fields}})))
-    case _ _ _ _:
+        u => Maybe.bind(&2, Parsed, Parsed, parse(p, ParseValue{}, rest), +r =>
+          parse(p, ObjectNext{Con{Field{key, value(r)}, fields}}, value.rest(r))))
+    case _ _ _:
       None{}
 
 def complete(r: Parsed) -> Maybe<&2, Value>:
@@ -236,7 +322,7 @@ def complete(r: Parsed) -> Maybe<&2, Value>:
 def read(+s: String) -> Maybe<&2, Value>:
   do Maybe<&2, Value>:
     tokens : List<&2, Token> <- lex(1n+String.length(s), s, 1)
-    r : Parsed <- parse(100000n, 0, tokens, Other{})
+    r : Parsed <- parse(100000n, ParseValue{}, tokens)
     complete(r)
 
 def get(fields: List<&2, Field>, +key: String) -> Maybe<&2, Value>:

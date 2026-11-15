@@ -1,74 +1,93 @@
 import Base
 import ./lex.bend as L
 
-# Bracket tree. A Grp holds the nodes between a matching pair of brackets.
-# Grp kinds: 40 '(', 91 '[', 123 '{', 35 '#['.
+# Grp kinds retain the opener token codes, including 35 for '#['.
 type Node is Data:
   Leaf{tok: L.Tok}
   Grp{kind: U32, line: U32, kids: List<&2, Node>}
 
-# An open bracket waiting for its closer: the nodes before it, newest first.
-type Frame is Data:
-  Frame{kind: U32, line: U32, saved: List<&2, Node>}
+type BuildContext is Data:
+  TreeRoot{}
+  OpenGroup{kind: U32, line: U32, saved: List<&2, Node>, outer: BuildContext}
 
-def close_all(stack: List<&2, Frame>, cur: List<&2, Node>) -> List<&2, Node>:
-  match stack:
-    case Nil{}:
+type Delimiter is Data:
+  Parenthesis{}
+  Bracket{}
+  Brace{}
+
+type BalanceContext is Data:
+  BalanceRoot{}
+  ExpectCloser{delimiter: Delimiter, outer: BalanceContext}
+
+def close_all(context: BuildContext, cur: List<&2, Node>) -> List<&2, Node>:
+  match context:
+    case TreeRoot{}:
       List.reverse(&2, Node, cur)
-    case Con{Frame{k, l, saved}, st}:
-      close_all(st, Con{Grp{k, l, List.reverse(&2, Node, cur)}, saved})
+    case OpenGroup{k, l, saved, outer}:
+      close_all(outer, Con{Grp{k, l, List.reverse(&2, Node, cur)}, saved})
 
-# cur is newest first. Unmatched closers are dropped; mismatched closers
-# close the innermost open bracket.
-def build(ts: List<&2, L.Tok>, cur: List<&2, Node>, stack: List<&2, Frame>) -> List<&2, Node>:
-  match ts stack:
-    case Nil{} st:
-      close_all(st, cur)
-    case Con{L.Tok{5, "(", l}, rest} st:
-      build(rest, [], Con{Frame{40, l, cur}, st})
-    case Con{L.Tok{5, "[", l}, rest} st:
-      build(rest, [], Con{Frame{91, l, cur}, st})
-    case Con{L.Tok{5, "{", l}, rest} st:
-      build(rest, [], Con{Frame{123, l, cur}, st})
-    case Con{L.Tok{5, "#[", l}, rest} st:
-      build(rest, [], Con{Frame{35, l, cur}, st})
-    case Con{L.Tok{5, ")", l}, rest} Nil{}:
-      build(rest, cur, [])
-    case Con{L.Tok{5, "]", l}, rest} Nil{}:
-      build(rest, cur, [])
-    case Con{L.Tok{5, "}", l}, rest} Nil{}:
-      build(rest, cur, [])
-    case Con{L.Tok{5, ")", l}, rest} Con{Frame{k, fl, saved}, st}:
-      build(rest, Con{Grp{k, fl, List.reverse(&2, Node, cur)}, saved}, st)
-    case Con{L.Tok{5, "]", l}, rest} Con{Frame{k, fl, saved}, st}:
-      build(rest, Con{Grp{k, fl, List.reverse(&2, Node, cur)}, saved}, st)
-    case Con{L.Tok{5, "}", l}, rest} Con{Frame{k, fl, saved}, st}:
-      build(rest, Con{Grp{k, fl, List.reverse(&2, Node, cur)}, saved}, st)
-    case Con{t, rest} st:
-      build(rest, Con{Leaf{t}, cur}, st)
+# The tolerant tree closes the innermost group for every closer, including mismatches.
+def build(ts: List<&2, L.Tok>, cur: List<&2, Node>, context: BuildContext) -> List<&2, Node>:
+  match ts context:
+    case Nil{} outer:
+      close_all(outer, cur)
+    case Con{L.Tok{5, "(", l}, rest} outer:
+      build(rest, [], OpenGroup{40, l, cur, outer})
+    case Con{L.Tok{5, "[", l}, rest} outer:
+      build(rest, [], OpenGroup{91, l, cur, outer})
+    case Con{L.Tok{5, "{", l}, rest} outer:
+      build(rest, [], OpenGroup{123, l, cur, outer})
+    case Con{L.Tok{5, "#[", l}, rest} outer:
+      build(rest, [], OpenGroup{35, l, cur, outer})
+    case Con{L.Tok{5, ")", l}, rest} TreeRoot{}:
+      build(rest, cur, TreeRoot{})
+    case Con{L.Tok{5, "]", l}, rest} TreeRoot{}:
+      build(rest, cur, TreeRoot{})
+    case Con{L.Tok{5, "}", l}, rest} TreeRoot{}:
+      build(rest, cur, TreeRoot{})
+    case Con{L.Tok{5, ")", l}, rest} OpenGroup{k, fl, saved, outer}:
+      build(rest, Con{Grp{k, fl, List.reverse(&2, Node, cur)}, saved}, outer)
+    case Con{L.Tok{5, "]", l}, rest} OpenGroup{k, fl, saved, outer}:
+      build(rest, Con{Grp{k, fl, List.reverse(&2, Node, cur)}, saved}, outer)
+    case Con{L.Tok{5, "}", l}, rest} OpenGroup{k, fl, saved, outer}:
+      build(rest, Con{Grp{k, fl, List.reverse(&2, Node, cur)}, saved}, outer)
+    case Con{t, rest} outer:
+      build(rest, Con{Leaf{t}, cur}, outer)
 
-def balanced(ts: List<&2, L.Tok>, stack: List<&2, String>) -> Bool:
-  match ts stack:
-    case Nil{} Nil{}:
+def closer(delimiter: Delimiter) -> String:
+  match delimiter:
+    case Parenthesis{}:
+      ")"
+    case Bracket{}:
+      "]"
+    case Brace{}:
+      "}"
+
+def balanced.go(ts: List<&2, L.Tok>, context: BalanceContext) -> Bool:
+  match ts context:
+    case Nil{} BalanceRoot{}:
       True{}
     case Nil{} _:
       False{}
-    case Con{L.Tok{5, "(", l}, rest} st:
-      balanced(rest, Con{")", st})
-    case Con{L.Tok{5, "[", l}, rest} st:
-      balanced(rest, Con{"]", st})
-    case Con{L.Tok{5, "#[", l}, rest} st:
-      balanced(rest, Con{"]", st})
-    case Con{L.Tok{5, "{", l}, rest} st:
-      balanced(rest, Con{"}", st})
-    case Con{L.Tok{5, +s, l}, +rest} Con{+expected, +st}:
+    case Con{L.Tok{5, "(", l}, rest} outer:
+      balanced.go(rest, ExpectCloser{Parenthesis{}, outer})
+    case Con{L.Tok{5, "[", l}, rest} outer:
+      balanced.go(rest, ExpectCloser{Bracket{}, outer})
+    case Con{L.Tok{5, "#[", l}, rest} outer:
+      balanced.go(rest, ExpectCloser{Bracket{}, outer})
+    case Con{L.Tok{5, "{", l}, rest} outer:
+      balanced.go(rest, ExpectCloser{Brace{}, outer})
+    case Con{L.Tok{5, +s, l}, +rest} ExpectCloser{+expected, +outer}:
       L.sel(Bool, String.eq(s, ")") || String.eq(s, "]") || String.eq(s, "}"),
-        u => String.eq(s, expected) && balanced(rest, st),
-        u => balanced(rest, Con{expected, st}))
-    case Con{L.Tok{5, +s, l}, rest} Nil{}:
-      Bool.not(String.eq(s, ")") || String.eq(s, "]") || String.eq(s, "}")) && balanced(rest, [])
-    case Con{t, rest} st:
-      balanced(rest, st)
+        u => String.eq(s, closer(expected)) && balanced.go(rest, outer),
+        u => balanced.go(rest, ExpectCloser{expected, outer}))
+    case Con{L.Tok{5, +s, l}, rest} BalanceRoot{}:
+      Bool.not(String.eq(s, ")") || String.eq(s, "]") || String.eq(s, "}")) && balanced.go(rest, BalanceRoot{})
+    case Con{t, rest} outer:
+      balanced.go(rest, outer)
+
+def balanced(ts: List<&2, L.Tok>) -> Bool:
+  balanced.go(ts, BalanceRoot{})
 
 def tree(ts: List<&2, L.Tok>) -> List<&2, Node>:
-  build(ts, [], [])
+  build(ts, [], TreeRoot{})
