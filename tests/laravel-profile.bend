@@ -23,9 +23,9 @@ def profile(a: String, db: String, r: String) -> E.Evidence:
 
 def observed(e: E.Evidence, +status: String) -> Bool:
   match e:
-    case E.Evidence{Con{E.Observation{"project/config/auth.php", 3, E.TokenGuard{}, E.Possible{}, guard},
+    case E.Complete{Con{E.Observation{"project/config/auth.php", 3, E.TokenGuard{}, E.Possible{}, guard},
       Con{E.Observation{"project/routes/api.php", 3, E.GuardRoute{}, E.Possible{}, route},
-      Con{E.Observation{"project/config/database.php", 2, E.DatabaseSelection{}, s, detail}, Nil{}}}}, False{}}:
+      Con{E.Observation{"project/config/database.php", 2, E.DatabaseSelection{}, s, detail}, Nil{}}}}}:
       String.eq(guard, "literal token guard api, hash false, eloquent provider users") &&
         String.eq(route, "literal auth:api middleware on Illuminate\\Support\\Facades\\Route::middleware(...)->get(...)") &&
         String.eq(E.status(s), status)
@@ -34,15 +34,15 @@ def observed(e: E.Evidence, +status: String) -> Bool:
 
 def empty(e: E.Evidence) -> Bool:
   match e:
-    case E.Evidence{Nil{}, False{}}:
+    case E.Complete{Nil{}}:
       True{}
     case _:
       False{}
 
 def no_database(e: E.Evidence) -> Bool:
   match e:
-    case E.Evidence{Con{E.Observation{p, 3, E.TokenGuard{}, E.Possible{}, d},
-      Con{E.Observation{q, 3, E.GuardRoute{}, E.Possible{}, e}, Nil{}}}, False{}}:
+    case E.Complete{Con{E.Observation{p, 3, E.TokenGuard{}, E.Possible{}, d},
+      Con{E.Observation{q, 3, E.GuardRoute{}, E.Possible{}, e}, Nil{}}}}:
       True{}
     case _:
       False{}

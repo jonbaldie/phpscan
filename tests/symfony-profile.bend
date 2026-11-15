@@ -6,8 +6,10 @@ import ../src/lex.bend as L
 
 def evidence(e: E.Evidence, expected: U32) -> Bool:
   match e:
-    case E.Evidence{sites, inc}:
-      Bool.not(inc) && U32.is_eq(U32.from_nat(List.length(&2, E.Site, sites)), expected)
+    case E.Complete{sites}:
+      U32.is_eq(U32.from_nat(List.length(&2, E.Site, sites)), expected)
+    case E.Incomplete{sites}:
+      False{}
 
 def source(typ: String, setup: String, prefix: String) -> String:
   "<?php namespace App; use Illuminate\\Http\\Request as WebRequest; class Access { function handle(" ++ typ ++ " $request) { " ++ setup ++ " if (str_starts_with($request->getPathInfo(), '" ++ prefix ++ "')) { abort_unless(auth()->check(), 403); } } }"

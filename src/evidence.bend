@@ -21,7 +21,12 @@ type Site is Data:
   Observation{path: String, line: U32, kind: ObservationKind, status: ObservationStatus, detail: String}
 
 type Evidence is Data:
-  Evidence{sites: List<&2, Site>, incomplete: Bool}
+  Complete{sites: List<&2, Site>}
+  Incomplete{sites: List<&2, Site>}
+
+type Completion is Data:
+  Finished{}
+  Exhausted{}
 
 def kind(k: ObservationKind) -> String:
   match k:
@@ -60,10 +65,37 @@ def status(s: ObservationStatus) -> String:
     case Unknown{}:
       "unknown"
 
+def completion_merge(a: Completion, b: Completion) -> Completion:
+  match a b:
+    case Finished{} Finished{}:
+      Finished{}
+    case _ _:
+      Exhausted{}
+
+def from_completion(sites: List<&2, Site>, completion: Completion) -> Evidence:
+  match completion:
+    case Finished{}:
+      Complete{sites}
+    case Exhausted{}:
+      Incomplete{sites}
+
+def sites(e: Evidence) -> List<&2, Site>:
+  match e:
+    case Complete{xs}:
+      xs
+    case Incomplete{xs}:
+      xs
+
 def merge(a: Evidence, b: Evidence) -> Evidence:
   match a b:
-    case Evidence{xs, i} Evidence{ys, j}:
-      Evidence{List.append(&2, Site, xs, ys), i || j}
+    case Complete{xs} Complete{ys}:
+      Complete{List.append(&2, Site, xs, ys)}
+    case Complete{xs} Incomplete{ys}:
+      Incomplete{List.append(&2, Site, xs, ys)}
+    case Incomplete{xs} Complete{ys}:
+      Incomplete{List.append(&2, Site, xs, ys)}
+    case Incomplete{xs} Incomplete{ys}:
+      Incomplete{List.append(&2, Site, xs, ys)}
 
 def ignored(xs: List<&2, U32>, +line: U32) -> Bool:
   match xs:
@@ -88,8 +120,10 @@ def visible(sites: List<&2, Site>, +lines: List<&2, U32>) -> List<&2, Site>:
 
 def suppress(e: Evidence, lines: List<&2, U32>) -> Evidence:
   match e:
-    case Evidence{sites, inc}:
-      Evidence{visible(sites, lines), inc}
+    case Complete{sites}:
+      Complete{visible(sites, lines)}
+    case Incomplete{sites}:
+      Incomplete{visible(sites, lines)}
 
 def for_profile(sites: List<&2, Site>, +wanted_profile: String) -> List<&2, Site>:
   match sites:

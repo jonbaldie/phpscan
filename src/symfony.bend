@@ -7,6 +7,14 @@ import ./evidence.bend as E
 type Import is Data:
   Import{alias: String, target: String}
 
+type NamespaceState is Data:
+  NoNamespace{}
+  OneNamespace{}
+
+type ParameterState is Data:
+  ParameterStart{}
+  ParameterTail{}
+
 def known(s: String) -> String:
   match s:
     case "illuminate\\http\\request":
@@ -48,12 +56,12 @@ def imports(ns: List<&2, T.Node>) -> List<&2, Import>:
     case Con{n, rest}:
       imports(rest)
 
-def simple_scope(ns: List<&2, T.Node>, seen: Bool) -> Bool:
+def simple_scope(ns: List<&2, T.Node>, seen: NamespaceState) -> Bool:
   match ns seen:
     case Nil{} _:
       True{}
-    case Con{T.Leaf{L.Tok{1, "namespace", l}}, Con{T.Leaf{L.Tok{1, name, n}}, Con{T.Leaf{L.Tok{5, ";", e}}, rest}}} False{}:
-      simple_scope(rest, True{})
+    case Con{T.Leaf{L.Tok{1, "namespace", l}}, Con{T.Leaf{L.Tok{1, name, n}}, Con{T.Leaf{L.Tok{5, ";", e}}, rest}}} NoNamespace{}:
+      simple_scope(rest, OneNamespace{})
     case Con{T.Leaf{L.Tok{1, "namespace", l}}, rest} _:
       False{}
     case Con{T.Leaf{L.Tok{1, "use", l}}, Con{T.Leaf{L.Tok{1, name, n}}, Con{T.Leaf{L.Tok{5, ";", e}}, rest}}} +seen:
@@ -65,18 +73,18 @@ def simple_scope(ns: List<&2, T.Node>, seen: Bool) -> Bool:
     case Con{n, rest} +seen:
       simple_scope(rest, seen)
 
-def parameter(ns: List<&2, T.Node>, +im: List<&2, Import>, start: Bool) -> List<&2, Import>:
+def parameter(ns: List<&2, T.Node>, +im: List<&2, Import>, start: ParameterState) -> List<&2, Import>:
   match ns start:
     case Nil{} _:
       []
-    case Con{T.Leaf{L.Tok{1, typ, l}}, Con{T.Leaf{L.Tok{0, name, n}}, Nil{}}} True{}:
+    case Con{T.Leaf{L.Tok{1, typ, l}}, Con{T.Leaf{L.Tok{0, name, n}}, Nil{}}} ParameterStart{}:
       [Import{name, resolve(typ, im)}]
-    case Con{T.Leaf{L.Tok{1, typ, l}}, Con{T.Leaf{L.Tok{0, name, n}}, Con{T.Leaf{L.Tok{5, ",", c}}, rest}}} True{}:
-      Con{Import{name, resolve(typ, im)}, parameter(rest, im, True{})}
+    case Con{T.Leaf{L.Tok{1, typ, l}}, Con{T.Leaf{L.Tok{0, name, n}}, Con{T.Leaf{L.Tok{5, ",", c}}, rest}}} ParameterStart{}:
+      Con{Import{name, resolve(typ, im)}, parameter(rest, im, ParameterStart{})}
     case Con{T.Leaf{L.Tok{5, ",", c}}, rest} _:
-      parameter(rest, im, True{})
+      parameter(rest, im, ParameterStart{})
     case Con{n, rest} _:
-      parameter(rest, im, False{})
+      parameter(rest, im, ParameterTail{})
 
 def receiver(ps: List<&2, Import>, +name: String) -> String:
   match ps:
@@ -112,21 +120,21 @@ def first_check(ns: List<&2, T.Node>, ps: List<&2, Import>, path: String) -> Lis
 def functions(fuel: Nat, ns: List<&2, T.Node>, +im: List<&2, Import>, +path: String) -> E.Evidence:
   match fuel ns:
     case 0n _:
-      E.Evidence{[], True{}}
+      E.Incomplete{[]}
     case 1n+p Nil{}:
-      E.Evidence{[], False{}}
+      E.Complete{[]}
     case 1n+(+p) Con{T.Leaf{L.Tok{1, "function", f}}, Con{T.Leaf{L.Tok{1, name, n}}, Con{T.Grp{40, a, params}, Con{T.Grp{123, b, body}, rest}}}}:
-      E.merge(E.Evidence{first_check(body, parameter(params, im, True{}), path), False{}}, functions(p, rest, im, path))
+      E.merge(E.Complete{first_check(body, parameter(params, im, ParameterStart{}), path)}, functions(p, rest, im, path))
     case 1n+(+p) Con{T.Grp{k, l, kids}, rest}:
       E.merge(functions(p, kids, im, path), functions(p, rest, im, path))
     case 1n+p Con{n, rest}:
       functions(p, rest, im, path)
 
 def analyze(+ns: List<&2, T.Node>, path: String, fuel: Nat) -> E.Evidence:
-  L.sel(E.Evidence, simple_scope(ns, False{}), u => functions(fuel, ns, imports(ns), path), u => E.Evidence{[], False{}})
+  L.sel(E.Evidence, simple_scope(ns, NoNamespace{}), u => functions(fuel, ns, imports(ns), path), u => E.Complete{[]})
 
 def scan(path: String, source: String) -> E.Evidence:
   +tokens = L.qualified(source)
   L.sel(E.Evidence, T.balanced(tokens, []),
     u => E.suppress(analyze(T.tree(L.without_ignores(tokens)), path, 1n+List.length(&2, L.Tok, tokens)), L.ignored_lines(tokens, 0)),
-    u => E.Evidence{[], False{}})
+    u => E.Complete{[]})
