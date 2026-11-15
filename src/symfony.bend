@@ -135,6 +135,6 @@ def analyze(+ns: List<&2, T.Node>, path: String, fuel: Nat) -> E.Evidence:
 
 def scan(path: String, source: String) -> E.Evidence:
   +tokens = L.qualified(source)
-  L.sel(E.Evidence, T.balanced(tokens, []),
-    u => E.suppress(analyze(T.tree(L.without_ignores(tokens)), path, 1n+List.length(&2, L.Tok, tokens)), L.ignored_lines(tokens, 0)),
+  L.sel(E.Evidence, T.balanced(tokens),
+    u => E.suppress(analyze(T.tree(L.without_ignores(tokens)), path, 1n+List.length(&2, L.Tok, tokens)), L.ignored_lines(tokens)),
     u => E.Complete{[]})

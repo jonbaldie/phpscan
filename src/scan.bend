@@ -121,7 +121,7 @@ type DeclarationContext is Data:
   InsideClass{}
 
 type SeedTarget is Data:
-  BaselineParameters{}
+  BaselineParameter65535{}
   SeedParameter{index: U32}
 
 type SummaryPhase is Data:
@@ -714,7 +714,6 @@ def files_safe(k: String) -> Bool:
     case _:
       False{}
 
-# Superglobal recognition precedes local environment lookup.
 def sg(name: String, rest: List<&2, T.Node>) -> Superglobal:
   match name rest:
     case "_GET" r:
@@ -1703,7 +1702,6 @@ def drop1(ns: List<&2, T.Node>) -> List<&2, T.Node>:
     case Con{n, rest}:
       rest
 
-# A `name(...)` first-class callable in a pipe.
 def pipe_name(ns: List<&2, T.Node>) -> PipeTarget:
   match ns:
     case Con{T.Leaf{L.Tok{1, +n, l}}, Con{T.Grp{40, l2, Con{T.Leaf{L.Tok{5, "...", l3}}, Nil{}}}, Nil{}}}:
@@ -2359,8 +2357,7 @@ def decls(fuel: Nat, ds: DS) -> List<&2, Decl>:
 # ---------------------------------------------------------------- summaries
 def seed.selected(target: SeedTarget, i: U32) -> Bool:
   match target:
-    case BaselineParameters{}:
-      # Preserve the former clean-run sentinel collision at parameter 65535.
+    case BaselineParameter65535{}:
       U32.is_eq(i, 65535)
     case SeedParameter{index}:
       U32.is_eq(i, index)
@@ -2465,7 +2462,7 @@ def decl_key(d: Decl) -> String:
       key
 
 def sum.decl(+fuel: Nat, +d: Decl, +cx: Map<&2, Sum>) -> KS:
-  +st = res_st(run(fuel, d, BaselineParameters{}, cx, SrcSeed{}))
+  +st = res_st(run(fuel, d, BaselineParameter65535{}, cx, SrcSeed{}))
   +xs = sum.params(decl_ps(d), fuel, d, 0, cx, st.fs(st))
   KS{decl_key(d), Sum{st_ret(st), ps.props(xs), ps.sinks(xs), ps.revived(xs)}}
 
@@ -2531,7 +2528,7 @@ def decl_fs(ds: List<&2, Decl>, +fuel: Nat, +cx: Map<&2, Sum>) -> List<&2, Findi
     case Nil{}:
       []
     case Con{d, rest}:
-      a b = st.fs(res_st(run(fuel, d, BaselineParameters{}, cx, SrcSeed{}))) decl_fs(rest, fuel, cx)
+      a b = st.fs(res_st(run(fuel, d, BaselineParameter65535{}, cx, SrcSeed{}))) decl_fs(rest, fuel, cx)
       List.concat(&2, Finding, [a, b])
 
 # ---------------------------------------------------------------- entry
@@ -2583,4 +2580,4 @@ def scan(src: String) -> List<&2, Finding>:
   +ds = decls(fuel, DS{[DW{ns, OutsideClass{}}], []})
   +cx = summaries(ds, fuel)
   top fs2 = st.fs(res_st(an(fuel, Stmts{ns, St{MTip{}, [], 0, 0}}, cx))) decl_fs(ds, fuel, cx)
-  f.sort(suppress(List.concat(&2, Finding, [top, fs2]), L.ignored_lines(ts, 0)), [])
+  f.sort(suppress(List.concat(&2, Finding, [top, fs2]), L.ignored_lines(ts)), [])

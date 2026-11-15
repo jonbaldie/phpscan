@@ -34,6 +34,6 @@ def main() -> U32:
     result(S.an(2n, S.Stmts{[], st}, MTip{}), 0, 1, 2, 8, [S.Finding{3, 8, "echo"}]) &&
     result(S.an(2n, S.JThen{done, S.KRet{}}, MTip{}), 0, 9, 2, 8, [S.Finding{3, 8, "echo"}]) &&
     declarations(S.decls(0n, partial)) && declarations(S.decls(1n, partial)) &&
-    U32.is_eq(S.env.get(S.bind([S.Param{"x", S.UntypedParam{}}], S.BaselineParameters{}, 65535, MTip{}, S.SrcSeed{}), "x", 0), 1023) &&
+    U32.is_eq(S.env.get(S.bind([S.Param{"x", S.UntypedParam{}}], S.BaselineParameter65535{}, 65535, MTip{}, S.SrcSeed{}), "x", 0), 1023) &&
     U32.is_eq(S.env.get(S.bind([S.Param{"x", S.NumericParam{}}], S.SeedParameter{0}, 0, MTip{}, S.MarkerSeed{}), "x", 1), 0)
   L.sel(U32, ok, u => 0, u => 1)

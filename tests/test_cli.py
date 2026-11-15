@@ -120,6 +120,30 @@ class CliTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertEqual(result.stderr, 'phpscan: 2 files, 1 findings, 0 incomplete\n')
 
+    def test_first_format_option_wins_even_when_later_format_is_invalid(self):
+        result = self.run_cli('--format=github', '--format=xml', self.bad)
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertTrue(result.stdout.startswith('::error file='), result.stdout)
+        invalid = self.run_cli('--format=xml', '--format=github', self.bad)
+        self.assertEqual(invalid.returncode, 2)
+        self.assertEqual(invalid.stdout, '')
+        self.assertIn('unknown format', invalid.stderr)
+
+    def test_first_unknown_option_wins_over_format_and_path_errors(self):
+        result = self.run_cli('--first', '--format=xml', '--second', self.root / 'missing')
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(result.stdout, '')
+        self.assertIn('unknown option --first', result.stderr)
+        self.assertNotIn('--second', result.stderr)
+
+    def test_help_and_version_are_only_special_as_sole_arguments(self):
+        for argument in ['--help', '-h', '--version']:
+            with self.subTest(argument=argument):
+                result = self.run_cli(argument, self.clean)
+                self.assertEqual(result.returncode, 2)
+                self.assertEqual(result.stdout, '')
+                self.assertIn('unknown option ' + argument, result.stderr)
+
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)

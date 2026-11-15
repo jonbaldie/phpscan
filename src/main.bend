@@ -20,8 +20,17 @@ type Rep is Data:
   Rep{path: String, fs: List<&2, S.Finding>}
   Inventory{path: String, fs: List<&2, A.Finding>}
 
+type Format is Data:
+  TextFormat{}
+  GithubFormat{}
+  SarifFormat{}
+
 type Opts is Data:
-  Opts{fmt: U32, paths: List<&2, String>, bad: String}
+  Opts{fmt: Maybe<&2, Format>, paths: List<&2, String>, bad: Maybe<&2, String>}
+
+type RootAnalysis is Data:
+  RootComplete{reports: List<&2, Rep>}
+  ProfilesPending{root: String, sources: List<&2, E.Src>, reports: List<&2, Rep>}
 
 # ---------------------------------------------------------------- classes
 
@@ -178,16 +187,16 @@ def sarif.one(+path: String, f: S.Finding) -> String:
       ",\"message\":{\"text\":" ++ json.str(msg(c, s)) ++ "},\"locations\":[{\"physicalLocation\":{\"artifactLocation\":{\"uri\":" ++
       json.str(path) ++ "},\"region\":{\"startLine\":" ++ U32.show(L.sel(U32, U32.is_eq(l, 0), u => 1, u => l)) ++ "}}}]}"
 
-def fmt.one(fmt: U32, +path: String, f: S.Finding) -> String:
+def fmt.one(fmt: Format, +path: String, f: S.Finding) -> String:
   match fmt:
-    case 1:
+    case GithubFormat{}:
       gh.one(path, f)
-    case 2:
+    case SarifFormat{}:
       sarif.one(path, f)
-    case _:
+    case TextFormat{}:
       text.one(path, f)
 
-def fmt.fs(fs: List<&2, S.Finding>, +fmt: U32, +path: String) -> List<&2, String>:
+def fmt.fs(fs: List<&2, S.Finding>, +fmt: Format, +path: String) -> List<&2, String>:
   match fs:
     case Nil{}:
       []
@@ -270,18 +279,18 @@ def advisory.notices(f: A.Finding) -> String:
     case _:
       ""
 
-def advisory.one(fmt: U32, +path: String, +f: A.Finding) -> String:
+def advisory.one(fmt: Format, +path: String, +f: A.Finding) -> String:
   match fmt:
-    case 1:
+    case GithubFormat{}:
       "::error file=" ++ gh.escape(path) ++ ",line=" ++ U32.show(A.line(f)) ++ ",title=phpscan " ++ A.rule(f) ++ "::" ++ gh.escape(A.message(f)) ++ "\n" ++ advisory.notices(f)
-    case 2:
+    case SarifFormat{}:
       "{\"ruleId\":" ++ json.str(A.rule(f)) ++ ",\"level\":" ++ json.str(L.sel(String, A.incomplete(f), u => "warning", u => "error")) ++
       ",\"message\":{\"text\":" ++ json.str(A.message(f)) ++ "},\"locations\":[{\"physicalLocation\":{\"artifactLocation\":{\"uri\":" ++
       json.str(path) ++ "},\"region\":{\"startLine\":" ++ U32.show(A.line(f)) ++ "}}}],\"properties\":" ++ advisory.props(f) ++ advisory.related(f) ++ "}"
-    case _:
+    case TextFormat{}:
       text.escape(path) ++ ":" ++ U32.show(A.line(f)) ++ ": [" ++ A.rule(f) ++ "] " ++ text.escape(A.message(f)) ++ "\n"
 
-def advisory.fs(fs: List<&2, A.Finding>, +fmt: U32, +path: String) -> List<&2, String>:
+def advisory.fs(fs: List<&2, A.Finding>, +fmt: Format, +path: String) -> List<&2, String>:
   match fs:
     case Nil{}:
       []
@@ -295,7 +304,7 @@ def advisory.rules(rs: List<&2, C.Advisory>) -> List<&2, String>:
     case Con{C.Advisory{id, cve, profile, ranges, sources, functions}, rest}:
       Con{"{\"id\":" ++ json.str(id) ++ ",\"shortDescription\":{\"text\":" ++ json.str(cve) ++ "}}", advisory.rules(rest)}
 
-def fmt.reps(rs: List<&2, Rep>, +fmt: U32) -> List<&2, String>:
+def fmt.reps(rs: List<&2, Rep>, +fmt: Format) -> List<&2, String>:
   match rs:
     case Nil{}:
       []
@@ -313,10 +322,10 @@ def sarif.doc(results: List<&2, String>) -> String:
   String.join(List.append(&2, String, [sarif.rule(1), sarif.rule(2), sarif.rule(4), sarif.rule(8), sarif.rule(16), sarif.rule(32), sarif.rule(64), sarif.rule(128), sarif.rule(256), sarif.rule(512), sarif.rule(0)], advisory.rules(C.records())), ",") ++
   "]}},\"results\":[" ++ String.join(results, ",") ++ "]}]}\n"
 
-def render(+fmt: U32, rs: List<&2, Rep>) -> String:
+def render(+fmt: Format, rs: List<&2, Rep>) -> String:
   match fmt:
-    case 2:
-      sarif.doc(fmt.reps(rs, 2))
+    case SarifFormat{}:
+      sarif.doc(fmt.reps(rs, SarifFormat{}))
     case f:
       String.concat(fmt.reps(rs, f))
 
@@ -417,7 +426,7 @@ def project.sources(xs: List<&2, E.Src>, +markers: List<&2, String>) -> List<&2,
 def project.symfony(xs: List<&2, E.Src>) -> E.Evidence:
   match xs:
     case Nil{}:
-      E.Evidence{[], False{}}
+      E.Complete{[]}
     case Con{E.Src{p, t}, rest}:
       E.merge(P.scan(p, t), project.symfony(rest))
 
@@ -431,8 +440,8 @@ def project.needs_profile(rs: List<&2, Rep>, +profile: String) -> Bool:
       project.needs_profile(rest, profile)
 
 def project.evidence(root: String, +xs: List<&2, E.Src>, +rs: List<&2, Rep>) -> E.Evidence:
-  a b = L.sel(E.Evidence, project.needs_profile(rs, "symfony-path-prefix"), u => project.symfony(xs), u => E.Evidence{[], False{}}) L.sel(E.Evidence, project.needs_profile(rs, "laravel-token-guard"), u => G.analyze(root, xs), u => E.Evidence{[], False{}})
-  c = L.sel(E.Evidence, project.needs_profile(rs, "laravel-jsonapi"), u => J.scan(xs), u => E.Evidence{[], False{}})
+  a b = L.sel(E.Evidence, project.needs_profile(rs, "symfony-path-prefix"), u => project.symfony(xs), u => E.Complete{[]}) L.sel(E.Evidence, project.needs_profile(rs, "laravel-token-guard"), u => G.analyze(root, xs), u => E.Complete{[]})
+  c = L.sel(E.Evidence, project.needs_profile(rs, "laravel-jsonapi"), u => J.scan(xs), u => E.Complete{[]})
   E.merge(E.merge(a, b), c)
 
 def project.enrich(rs: List<&2, Rep>, +e: E.Evidence) -> List<&2, Rep>:
@@ -444,7 +453,7 @@ def project.enrich(rs: List<&2, Rep>, +e: E.Evidence) -> List<&2, Rep>:
     case Con{r, rest}:
       Con{r, project.enrich(rest, e)}
 
-def finish(+fmt: U32, +nfiles: U32, +rs: List<&2, Rep>) -> IO(Unit):
+def finish(+fmt: Format, +nfiles: U32, +rs: List<&2, Rep>) -> IO(Unit):
   +n = count(rs, False{})
   +inc = count(rs, True{})
   do IO<Unit>:
@@ -515,6 +524,20 @@ def read_all(ps: List<&2, String>) -> IO(List<&2, E.Src>):
 def str.le(a: String, b: String) -> Bool:
   String.is_le(a, b)
 
+def project.analyze(+p: String, +srcs: List<&2, E.Src>) -> RootAnalysis:
+  +rs = scan_all(64n, srcs)
+  L.sel(RootAnalysis, project.needs_source(rs),
+    u => ProfilesPending{p, srcs, rs}, u => RootComplete{rs})
+
+def project.complete(state: RootAnalysis) -> IO(List<&2, Rep>):
+  match state:
+    case RootComplete{rs}:
+      IO.pure(List<&2, Rep>, rs)
+    case ProfilesPending{+p, srcs, +rs}:
+      do IO<List<&2, Rep>>:
+        markers : List<&2, String> <- list_boundaries(p)
+        return project.enrich(rs, project.evidence(p, project.sources(srcs, markers), rs))
+
 def projects(ps: List<&2, String>) -> IO(List<&2, Rep>):
   match ps:
     case Nil{}:
@@ -522,11 +545,8 @@ def projects(ps: List<&2, String>) -> IO(List<&2, Rep>):
     case Con{+p, rest}:
       do IO<List<&2, Rep>>:
         files : List<&2, String> <- list_one(p)
-        +srcs : List<&2, E.Src> <- read_all(List.sort(~String, ~str.le, files))
-        +rs : List<&2, Rep> = scan_all(64n, srcs)
-        +active : Bool = project.needs_source(rs)
-        markers : List<&2, String> <- L.sel(IO(List<&2, String>), active, u => list_boundaries(p), u => IO.pure(List<&2, String>, []))
-        a : List<&2, Rep> = L.sel(List<&2, Rep>, active, u => project.enrich(rs, project.evidence(p, project.sources(srcs, markers), rs)), u => rs)
+        srcs : List<&2, E.Src> <- read_all(List.sort(~String, ~str.le, files))
+        a : List<&2, Rep> <- project.complete(project.analyze(p, srcs))
         b : List<&2, Rep> <- projects(rest)
         return List.append(&2, Rep, a, b)
 
@@ -540,37 +560,37 @@ def report.path(r: Rep) -> String:
 def report.le(a: Rep, b: Rep) -> Bool:
   String.is_le(report.path(a), report.path(b))
 
-def run(+fmt: U32, ps: List<&2, String>) -> IO(Unit):
+def run(+fmt: Format, ps: List<&2, String>) -> IO(Unit):
   do IO<Unit>:
     +rs : List<&2, Rep> <- projects(ps)
     finish(fmt, U32.from_nat(List.length(&2, Rep, rs)), List.sort(~Rep, ~report.le, rs))
 
 # ---------------------------------------------------------------- arguments
 
-def fmt_code(s: String) -> U32:
+def format(s: String) -> Maybe<&2, Format>:
   match s:
     case "text":
-      0
+      Some{TextFormat{}}
     case "github":
-      1
+      Some{GithubFormat{}}
     case "sarif":
-      2
+      Some{SarifFormat{}}
     case _:
-      99
+      None{}
 
 def opt(+a: String, o: Opts) -> Opts:
   match o:
     case Opts{+f, +ps, +bad}:
       L.sel(Opts, String.starts_with(a, "--format="),
-        u => Opts{fmt_code(String.drop(a, 9n)), ps, bad},
+        u => Opts{format(String.drop(a, 9n)), ps, bad},
         u => L.sel(Opts, String.starts_with(a, "-") && Bool.not(String.eq(a, "-")),
-          v => Opts{f, ps, a},
+          v => Opts{f, ps, Some{a}},
           v => Opts{f, Con{a, ps}, bad}))
 
 def opts(as: List<&2, String>) -> Opts:
   match as:
     case Nil{}:
-      Opts{0, [], ""}
+      Opts{Some{TextFormat{}}, [], None{}}
     case Con{a, rest}:
       opt(a, opts(rest))
 
@@ -579,11 +599,13 @@ def usage() -> String:
 
 def go(o: Opts) -> IO(Unit):
   match o:
-    case Opts{+f, +ps, +bad}:
-      L.sel(IO(Unit), Bool.not(String.is_empty(bad)), u => IO.die(Unit, 2, "phpscan: unknown option " ++ bad ++ "\n" ++ usage()),
-        u => L.sel(IO(Unit), U32.is_eq(f, 99), v => IO.die(Unit, 2, "phpscan: unknown format\n" ++ usage()),
-          v => L.sel(IO(Unit), List.is_empty(&2, String, ps), w => IO.die(Unit, 2, usage()),
-            w => run(f, ps))))
+    case Opts{f, ps, Some{bad}}:
+      IO.die(Unit, 2, "phpscan: unknown option " ++ bad ++ "\n" ++ usage())
+    case Opts{None{}, ps, None{}}:
+      IO.die(Unit, 2, "phpscan: unknown format\n" ++ usage())
+    case Opts{Some{f}, +ps, None{}}:
+      L.sel(IO(Unit), List.is_empty(&2, String, ps),
+        u => IO.die(Unit, 2, usage()), u => run(f, ps))
 
 def args_rest(as: List<&2, String>) -> List<&2, String>:
   match as:

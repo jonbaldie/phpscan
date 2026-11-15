@@ -26,33 +26,32 @@ def close_all(context: BuildContext, cur: List<&2, Node>) -> List<&2, Node>:
     case OpenGroup{k, l, saved, outer}:
       close_all(outer, Con{Grp{k, l, List.reverse(&2, Node, cur)}, saved})
 
-# The tolerant tree closes the innermost group for every closer, including mismatches.
-def build(ts: List<&2, L.Tok>, cur: List<&2, Node>, context: BuildContext) -> List<&2, Node>:
+def build.tolerant(ts: List<&2, L.Tok>, cur: List<&2, Node>, context: BuildContext) -> List<&2, Node>:
   match ts context:
     case Nil{} outer:
       close_all(outer, cur)
     case Con{L.Tok{5, "(", l}, rest} outer:
-      build(rest, [], OpenGroup{40, l, cur, outer})
+      build.tolerant(rest, [], OpenGroup{40, l, cur, outer})
     case Con{L.Tok{5, "[", l}, rest} outer:
-      build(rest, [], OpenGroup{91, l, cur, outer})
+      build.tolerant(rest, [], OpenGroup{91, l, cur, outer})
     case Con{L.Tok{5, "{", l}, rest} outer:
-      build(rest, [], OpenGroup{123, l, cur, outer})
+      build.tolerant(rest, [], OpenGroup{123, l, cur, outer})
     case Con{L.Tok{5, "#[", l}, rest} outer:
-      build(rest, [], OpenGroup{35, l, cur, outer})
+      build.tolerant(rest, [], OpenGroup{35, l, cur, outer})
     case Con{L.Tok{5, ")", l}, rest} TreeRoot{}:
-      build(rest, cur, TreeRoot{})
+      build.tolerant(rest, cur, TreeRoot{})
     case Con{L.Tok{5, "]", l}, rest} TreeRoot{}:
-      build(rest, cur, TreeRoot{})
+      build.tolerant(rest, cur, TreeRoot{})
     case Con{L.Tok{5, "}", l}, rest} TreeRoot{}:
-      build(rest, cur, TreeRoot{})
+      build.tolerant(rest, cur, TreeRoot{})
     case Con{L.Tok{5, ")", l}, rest} OpenGroup{k, fl, saved, outer}:
-      build(rest, Con{Grp{k, fl, List.reverse(&2, Node, cur)}, saved}, outer)
+      build.tolerant(rest, Con{Grp{k, fl, List.reverse(&2, Node, cur)}, saved}, outer)
     case Con{L.Tok{5, "]", l}, rest} OpenGroup{k, fl, saved, outer}:
-      build(rest, Con{Grp{k, fl, List.reverse(&2, Node, cur)}, saved}, outer)
+      build.tolerant(rest, Con{Grp{k, fl, List.reverse(&2, Node, cur)}, saved}, outer)
     case Con{L.Tok{5, "}", l}, rest} OpenGroup{k, fl, saved, outer}:
-      build(rest, Con{Grp{k, fl, List.reverse(&2, Node, cur)}, saved}, outer)
+      build.tolerant(rest, Con{Grp{k, fl, List.reverse(&2, Node, cur)}, saved}, outer)
     case Con{t, rest} outer:
-      build(rest, Con{Leaf{t}, cur}, outer)
+      build.tolerant(rest, Con{Leaf{t}, cur}, outer)
 
 def closer(delimiter: Delimiter) -> String:
   match delimiter:
@@ -90,4 +89,4 @@ def balanced(ts: List<&2, L.Tok>) -> Bool:
   balanced.go(ts, BalanceRoot{})
 
 def tree(ts: List<&2, L.Tok>) -> List<&2, Node>:
-  build(ts, [], TreeRoot{})
+  build.tolerant(ts, [], TreeRoot{})

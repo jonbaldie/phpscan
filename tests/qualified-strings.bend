@@ -47,8 +47,10 @@ def block_strings() -> Bool:
 
 def symfony.evidence(e: E.Evidence, expected: U32) -> Bool:
   match e:
-    case E.Evidence{sites, incomplete}:
-      Bool.not(incomplete) && U32.is_eq(U32.from_nat(List.length(&2, E.Site, sites)), expected)
+    case E.Complete{sites}:
+      U32.is_eq(U32.from_nat(List.length(&2, E.Site, sites)), expected)
+    case E.Incomplete{sites}:
+      False{}
 
 def symfony(prefix: String, expected: U32) -> Bool:
   src = "<?php function access(\\Symfony\\Component\\HttpFoundation\\Request $request) { if (str_starts_with($request->getPathInfo(), " ++ prefix ++ ")) { abort_unless(auth()->check(), 403); } }"

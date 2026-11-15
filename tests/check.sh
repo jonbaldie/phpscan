@@ -4,7 +4,7 @@
 # Exit 0 when every fixture matches exactly, 1 otherwise.
 set -u
 bin=$1; shift
-fail=0
+verdict=passing
 for f in "$@"; do
   want=$(grep -n 'expect: ' "$f" | sed -E 's/^([0-9]+):.*expect: (.*)$/\1 \2/' |
     awk '{for (i = 2; i <= NF; i++) print $1, $i}' | sort)
@@ -18,10 +18,10 @@ for f in "$@"; do
     echo "FAIL $f (exit $code, want $expected_code)"
     printf '%s\n' "$raw"
     diff <(printf '%s\n' "$want") <(printf '%s\n' "$got") | sed 's/^</  missing:/; s/^>/  unexpected:/' | grep -E 'missing|unexpected'
-    fail=1
+    verdict=failed
   fi
 done
 if ! python3 tests/test_jsonapi.py "$bin"; then
-  fail=1
+  verdict=failed
 fi
-exit $fail
+case "$verdict" in passing) exit 0;; failed) exit 1;; esac

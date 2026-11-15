@@ -30,7 +30,7 @@ type StringCut is Data:
   StringCut{rest: String, line: U32, contents: StringContents}
 
 type QuoteEnd is Data:
-  EndOfInput{}
+  EndOrNul{}
   QuoteCharacter{code: U32}
 
 type CastProbe is Data:
@@ -206,8 +206,7 @@ def q.text.ch(c: Char, +line: U32, vars: String, lit: String) -> Q:
 
 def q.terminates(term: QuoteEnd, c: Char) -> Bool:
   match term:
-    case EndOfInput{}:
-      # Heredoc interpolation historically stops at an embedded NUL as well as EOF.
+    case EndOrNul{}:
       U32.is_eq(code(c), 0)
     case QuoteCharacter{n}:
       U32.is_eq(code(c), n)
@@ -216,8 +215,7 @@ def q.text(+c: Char, +term: QuoteEnd, +line: U32, +vars: String, +lit: String) -
   sel(Q, q.terminates(term, c), u => Q{QuoteFinished{}, line, vars, lit},
     u => q.text.ch(c, line, vars, lit))
 
-# Brace depth deliberately ignores quoted subexpressions, matching PHP scan tolerance.
-def q.skip(c: Char, +line: U32, +vars: String, +lit: String, +depth: U32) -> Q:
+def q.skip.braces(c: Char, +line: U32, +vars: String, +lit: String, +depth: U32) -> Q:
   match c:
     case '}':
       sel(Q, U32.is_eq(depth, 1), u => Q{QuoteText{}, line, vars, lit},
@@ -235,11 +233,11 @@ def q.name(+c: Char, +term: QuoteEnd, +line: U32, +name: String, +vars: String, 
 
 def q.cname(+c: Char, +line: U32, +name: String, +vars: String, +lit: String) -> Q:
   sel(Q, is_name_char(c), u => Q{QuoteBracedName{SCon{c, name}}, line, vars, lit},
-    u => q.skip(c, line, q.var(name, vars), lit, 1))
+    u => q.skip.braces(c, line, q.var(name, vars), lit, 1))
 
 def q.dname(+c: Char, +line: U32, +name: String, +vars: String, +lit: String) -> Q:
   sel(Q, is_name_char(c), u => Q{QuoteDollarName{SCon{c, name}}, line, vars, lit},
-    u => q.skip(c, line, q.var(name, vars), lit, 1))
+    u => q.skip.braces(c, line, q.var(name, vars), lit, 1))
 
 def q.dollar.brace(c: Char, +term: QuoteEnd, +line: U32, +vars: String, +lit: String) -> Q:
   match c:
@@ -268,7 +266,7 @@ def q.step(q: Q, +c: Char, +term: QuoteEnd) -> Q:
     case Q{QuoteBracedName{name}, line, vars, lit}:
       q.cname(c, line, name, vars, lit)
     case Q{QuoteSkip{depth}, line, vars, lit}:
-      q.skip(c, line, vars, lit, depth)
+      q.skip.braces(c, line, vars, lit, depth)
     case Q{QuoteDollarName{name}, line, vars, lit}:
       q.dname(c, line, name, vars, lit)
     case Q{QuoteDollar{}, line, vars, lit}:
@@ -472,7 +470,7 @@ def hd.tok(style: DocStyle, rest: String, +line2: U32, +line: U32, body: String)
     case Nowdoc{}:
       Step{rest, line2, [tok(2, body, line)]}
     case Heredoc{}:
-      hd.interp(rest, line2, line, interp.start(body, EndOfInput{}, line))
+      hd.interp(rest, line2, line, interp.start(body, EndOrNul{}, line))
 
 def hd.body.fin(style: DocStyle, +line: U32, b: Cut) -> Step:
   match b:
@@ -643,10 +641,9 @@ def without_ignores(ts: List<&2, Tok>) -> List<&2, Tok>:
     case Con{t, rest}:
       Con{t, without_ignores(rest)}
 
-def ignored.same(previous: PreviousToken, +line: U32) -> Bool:
+def ignored.same_or_initial_zero(previous: PreviousToken, +line: U32) -> Bool:
   match previous:
     case NoPrevious{}:
-      # Preserve synthetic line-zero directives accepted by the original fresh entry.
       U32.is_eq(line, 0)
     case PreviousLine{last}:
       U32.is_eq(line, last)
@@ -656,7 +653,7 @@ def ignored_lines.go(ts: List<&2, Tok>, +previous: PreviousToken) -> List<&2, U3
     case Nil{}:
       []
     case Con{Tok{8, s, +l}, +rest}:
-      sel(List<&2, U32>, ignored.same(previous, l),
+      sel(List<&2, U32>, ignored.same_or_initial_zero(previous, l),
         u => Con{l, ignored_lines.go(rest, previous)},
         u => Con{U32.add(l, 1), ignored_lines.go(rest, previous)})
     case Con{Tok{k, s, +l}, rest}:

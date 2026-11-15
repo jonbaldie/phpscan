@@ -107,9 +107,9 @@ def returned(ns: List<&2, T.Node>) -> Maybe<&2, List<&2, Field>>:
 
 def parse_config(+path: String, +tokens: List<&2, L.Tok>) -> Maybe<&2, Config>:
   do Maybe<&2, Config>:
-    fs : List<&2, Field> <- L.sel(Maybe<&2, List<&2, Field>>, T.balanced(tokens, []),
+    fs : List<&2, Field> <- L.sel(Maybe<&2, List<&2, Field>>, T.balanced(tokens),
       u => returned(T.tree(L.without_ignores(tokens))), u => None{})
-    return Config{path, fs, L.ignored_lines(tokens, 0)}
+    return Config{path, fs, L.ignored_lines(tokens)}
 
 def config(xs: List<&2, E.Src>, +path: String) -> Maybe<&2, Config>:
   match xs:
@@ -276,11 +276,11 @@ def route_statements(ss: List<&2, List<&2, T.Node>>, state: RouteState, +path: S
 
 def route_file(path: String, +ts: List<&2, L.Tok>) -> List<&2, Route>:
   parsed = do Maybe<&2, List<&2, Route>>:
-    +ns : List<&2, T.Node> <- L.sel(Maybe<&2, List<&2, T.Node>>, T.balanced(ts, []),
+    +ns : List<&2, T.Node> <- L.sel(Maybe<&2, List<&2, T.Node>>, T.balanced(ts),
       u => Some{T.tree(L.without_ignores(ts))}, u => None{})
     ss : List<&2, List<&2, T.Node>> <- L.sel(Maybe<&2, List<&2, List<&2, T.Node>>>, unsupported_context(ns),
       u => None{}, u => statements(ns, StatementBoundary{}, []))
-    rs : List<&2, Route> <- route_statements(ss, ReadingRoutes{[], []}, path, L.ignored_lines(ts, 0))
+    rs : List<&2, Route> <- route_statements(ss, ReadingRoutes{[], []}, path, L.ignored_lines(ts))
     return rs
   Maybe.default(&2, List<&2, Route>, parsed, [])
 

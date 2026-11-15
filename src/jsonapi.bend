@@ -318,8 +318,8 @@ def index_file(source: E.Src, +entries: List<&2, Entry>) -> Index:
     case E.Src{path, text}:
       +tokens = L.qualified(text)
       +nodes = T.tree(L.without_ignores(tokens))
-      L.sel(Index, T.balanced(tokens, []),
-        u => declarations(1n+List.length(&2, L.Tok, tokens), nodes, file_scope(nodes), path, L.ignored_lines(tokens, 0), class_count(L.without_ignores(tokens)), entries),
+      L.sel(Index, T.balanced(tokens),
+        u => declarations(1n+List.length(&2, L.Tok, tokens), nodes, file_scope(nodes), path, L.ignored_lines(tokens), class_count(L.without_ignores(tokens)), entries),
         u => Index{entries, Uncertain{}, E.Finished{}})
 
 def certainty_merge(a: Certainty, b: Certainty) -> Certainty:
@@ -434,7 +434,7 @@ def route_files(sources: List<&2, E.Src>, +entries: List<&2, Entry>) -> ScanResu
     case Con{E.Src{path, text}, rest}:
       +tokens = L.qualified(text)
       +nodes = T.tree(L.without_ignores(tokens))
-      a b = routes(1n+List.length(&2, L.Tok, tokens), nodes, file_scope(nodes), entries, path, L.ignored_lines(tokens, 0)) route_files(rest, entries)
+      a b = routes(1n+List.length(&2, L.Tok, tokens), nodes, file_scope(nodes), entries, path, L.ignored_lines(tokens)) route_files(rest, entries)
       append_results(a, b)
 
 def resources(entries: List<&2, Entry>) -> List<&2, Resource>:
