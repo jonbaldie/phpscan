@@ -4,12 +4,11 @@ import ./tree.bend as T
 
 # Taint analysis over the bracket tree.
 #
-# A taint is a U32 of vulnerability classes the value can still reach:
+# A taint packs simultaneous vulnerability classes and named marker roles:
 #   1 sql  2 cmd  4 code  8 xss  16 file  32 include  64 ssrf  128 deser
 #   256 header  512 varoverwrite
 # Request input carries all of them (1023). A sanitizer clears the classes it
 # defends; a sink reports when its class bit is still set.
-
 type Finding is Data:
   Finding{line: U32, cls: U32, sink: String}
 
@@ -33,10 +32,14 @@ type Seed is Data:
   SrcSeed{}
   MarkerSeed{}
 
+type ReceiverPolicy is Data:
+  IgnoreReceiver{}
+  PropagateReceiver{}
+
 # A builtin model. result = (OR of args in ra, minus clr) | src, plus the
-# receiver when rcv is 1. Reports cls sc when the OR of args in sa has it.
+# receiver when its policy propagates it. Reports sc when masked args have it.
 type Model is Data:
-  Model{sc: U32, sa: U32, ra: U32, clr: U32, src: U32, rcv: U32}
+  Model{sc: U32, sa: U32, ra: U32, clr: U32, src: U32, rcv: ReceiverPolicy}
 
 type Two is Data:
   Two{a: List<&2, T.Node>, b: List<&2, T.Node>}
@@ -47,36 +50,121 @@ type Sp is Data:
 type Three is Data:
   Three{a: List<&2, T.Node>, b: List<&2, T.Node>, c: List<&2, T.Node>}
 
-# A pending call: kind 0 function, 1 method, 2 static method, 3 dynamic.
+type CallKind is Data:
+  FunctionCall{}
+  MethodCall{}
+  StaticCall{}
+  DynamicCall{}
+
+type CallbackTarget is Data:
+  UnknownCallback{}
+  FunctionCallback{name: String}
+  MethodCallback{name: String}
+
+type PipeTarget is Data:
+  UnknownPipe{}
+  NamedPipe{name: String}
+
+type CallSpecial is Data:
+  OrdinaryCall{}
+  RequestCall{}
+  CleanCall{}
+  CurlUrlCall{}
+  CallbackCall{target: CallbackTarget}
+  ParseStrScope{}
+  DecoderCall{}
+  ParseStrOutput{}
+
 type CallI is Data:
-  CallI{kind: U32, name: String, cls: String, line: U32, recv: U32, spec: U32, cb: String, args: List<&2, T.Node>, rest: List<&2, T.Node>}
+  CallI{kind: CallKind, name: String, cls: String, line: U32, recv: U32, special: CallSpecial, args: List<&2, T.Node>, rest: List<&2, T.Node>}
+
+type ParamType is Data:
+  UntypedParam{}
+  NumericParam{}
+  OtherParam{}
 
 type Param is Data:
-  Param{name: String, num: Bool}
+  Param{name: String, kind: ParamType}
+
+type OperandContext is Data:
+  ExpectOperand{}
+  AfterOperand{}
+
+type BindingLevel is Data:
+  NoBinary{}
+  ArrowLevel{}
+  WordLogicLevel{}
+  AssignmentLevel{}
+  TernaryLevel{}
+  CoalesceLevel{}
+  OrLevel{}
+  AndLevel{}
+  BitwiseLevel{}
+  CompareLevel{}
+  PipeLevel{}
+  ConcatLevel{}
+  ShiftLevel{}
+  AddLevel{}
+  MultiplyLevel{}
+  PowerLevel{}
+
+type PartMode is Data:
+  CleanParts{}
+  UnionParts{acc: U32}
+
+type StorageIdentity is Data:
+  NoStorage{}
+  Storage{key: String}
+
+type DeclarationContext is Data:
+  OutsideClass{}
+  InsideClass{}
+
+type SeedTarget is Data:
+  BaselineParameter65535{}
+  SeedParameter{index: U32}
+
+type SummaryPhase is Data:
+  FirstSummary{}
+  SecondSummary{}
+  ThirdSummary{}
+  SummariesReady{}
+
+type SummaryBuild is Data:
+  SummaryBuild{phase: SummaryPhase, summaries: Map<&2, Sum>}
+
+type MarkerRole is Data:
+  ParameterOrigin{}
+  DecoderRestoration{}
+
+type SinkFlow is Data:
+  SinkFlow{normal: U32, restored: U32}
+
+type Superglobal is Data:
+  LocalVariable{}
+  GlobalTaint{taint: U32}
 
 type Decl is Data:
   Decl{key: String, ps: List<&2, Param>, body: List<&2, T.Node>}
 
 # ---------------------------------------------------------------- basics
-
 def ALL() -> U32:
   4294967295
 
 def SRC() -> U32:
   1023
 
-# Internal summary-only marker for request taint, not a vulnerability class.
-def SUMMARY_MARKER() -> U32:
-  1024
+def marker.bit(role: MarkerRole) -> U32:
+  match role:
+    case ParameterOrigin{}:
+      1024
+    case DecoderRestoration{}:
+      2048
 
-# Internal flag marking taint restored by a decoder during summary analysis.
-def RESTORED() -> U32:
-  2048
-
-def tor(a: U32, b: U32) -> U32:
+def taint.join(a: U32, b: U32) -> U32:
   U32.or(a, b)
 
-def tclr(a: U32, c: U32) -> U32:
+def taint.sanitize(a: U32, c: U32) -> U32:
   U32.and(a, U32.not(c))
 
 def nz(a: U32) -> Bool:
@@ -105,7 +193,7 @@ def env.join.go(kvs: List<&2, Sigma<&2, &2, String, _ => U32>>, +pre: Map<&2, U3
     case Nil{}:
       pre
     case Con{(+k, +v), t}:
-      env.join.go(t, env.set(pre, k, tor(v, env.get(pre, k, 0))))
+      env.join.go(t, env.set(pre, k, taint.join(v, env.get(pre, k, 0))))
 
 # Pointwise OR: a variable after a branch may hold either value.
 def env.join(pre: Map<&2, U32>, post: Map<&2, U32>) -> Map<&2, U32>:
@@ -124,7 +212,7 @@ def or_list(ts: List<&2, U32>) -> U32:
     case Nil{}:
       0
     case Con{t, rest}:
-      tor(t, or_list(rest))
+      taint.join(t, or_list(rest))
 
 # OR of the taints whose position bit is set in mask.
 def mask_or(ts: List<&2, U32>, +mask: U32) -> U32:
@@ -132,7 +220,7 @@ def mask_or(ts: List<&2, U32>, +mask: U32) -> U32:
     case Nil{}:
       0
     case Con{t, rest}:
-      tor(b2t(nz(U32.and(mask, 1)), t), mask_or(rest, U32.shr(mask)))
+      taint.join(b2t(nz(U32.and(mask, 1)), t), mask_or(rest, U32.shr(mask)))
 
 def tail(ts: List<&2, U32>) -> List<&2, U32>:
   match ts:
@@ -144,14 +232,18 @@ def tail(ts: List<&2, U32>) -> List<&2, U32>:
 def fs.add(+fs: List<&2, Finding>, +line: U32, +cls: U32, sink: String) -> List<&2, Finding>:
   L.sel(List<&2, Finding>, nz(cls), u => Con{Finding{line, cls, sink}, fs}, u => fs)
 
-def is.restored(taint: U32) -> Bool:
-  nz(U32.and(taint, RESTORED()))
+def marker.has(taint: U32, role: MarkerRole) -> Bool:
+  nz(U32.and(taint, marker.bit(role)))
 
-# Encode sink classes reached after decoding above bit 9 for summary extraction.
-def sink.bits(+taint: U32, cls: U32) -> U32:
+def marker.add(taint: U32, role: MarkerRole) -> U32:
+  U32.or(taint, marker.bit(role))
+
+def taint.decode(+taint: U32) -> U32:
+  U32.or(b2t(nz(U32.and(taint, SRC())), SRC()), b2t(marker.has(taint, ParameterOrigin{}), marker.bit(DecoderRestoration{})))
+
+def sink.bits(+taint: U32, cls: U32) -> SinkFlow:
   +hit = U32.and(taint, cls)
-  +factor = U32.add(1, b2t(is.restored(taint), 1024))
-  U32.mul(hit, factor)
+  SinkFlow{hit, b2t(marker.has(taint, DecoderRestoration{}), hit)}
 
 # One finding per class bit set in bits.
 def fs.bits(n: Nat, +bits: U32, +bit: U32, +fs: List<&2, Finding>, +line: U32, +sink: String) -> List<&2, Finding>:
@@ -161,17 +253,17 @@ def fs.bits(n: Nat, +bits: U32, +bit: U32, +fs: List<&2, Finding>, +line: U32, +
     case 1n+p:
       fs.bits(p, bits, U32.shl(bit), fs.add(fs, line, U32.and(bits, bit), sink), line, sink)
 
-def st.find(st: St, +line: U32, +bits: U32, +sink: String) -> St:
-  match st:
-    case St{env, fs, ret, revived}:
-      +normal = U32.and(bits, SRC())
-      +restore = U32.and(U32.shrn(bits, 10n), SRC())
-      St{env, fs.bits(10n, U32.or(normal, restore), 1, fs, line, sink), ret, tor(revived, restore)}
+def st.find(st: St, +line: U32, flow: SinkFlow, +sink: String) -> St:
+  match st flow:
+    case St{env, fs, ret, revived} SinkFlow{normal, restored}:
+      +hits = U32.and(normal, SRC())
+      +restore = U32.and(restored, SRC())
+      St{env, fs.bits(10n, U32.or(hits, restore), 1, fs, line, sink), ret, taint.join(revived, restore)}
 
 def st.ret(st: St, +t: U32) -> St:
   match st:
     case St{env, fs, ret, revived}:
-      St{env, fs, tor(ret, t), revived}
+      St{env, fs, taint.join(ret, t), revived}
 
 def st.env(st: St) -> Map<&2, U32>:
   match st:
@@ -184,7 +276,6 @@ def st.revived(st: St) -> U32:
       revived
 
 # ---------------------------------------------------------------- nodes
-
 def leaf_is(n: T.Node, +kind: U32, +text: String) -> Bool:
   match n:
     case T.Leaf{L.Tok{k, s, l}}:
@@ -314,126 +405,171 @@ def is_asg(s: String) -> Bool:
     case _:
       False{}
 
-# Binding levels, loosest first. 0 means not a binary operator.
-#   1 =>  2 and/or/xor  3 assignment  4 ?:  5 ??  6 ||  7 &&  8 | ^ &
-#   9 comparison  10 |>  11 .  12 << >>  13 + -  14 * / %  15 **
-def op_level(+s: String) -> U32:
+def op_level(+s: String) -> BindingLevel:
   match s:
     case "=>":
-      1
+      ArrowLevel{}
     case "?":
-      4
+      TernaryLevel{}
     case "??":
-      5
+      CoalesceLevel{}
     case "||":
-      6
+      OrLevel{}
     case "&&":
-      7
+      AndLevel{}
     case "|":
-      8
+      BitwiseLevel{}
     case "^":
-      8
+      BitwiseLevel{}
     case "&":
-      8
+      BitwiseLevel{}
     case "==":
-      9
+      CompareLevel{}
     case "!=":
-      9
+      CompareLevel{}
     case "===":
-      9
+      CompareLevel{}
     case "!==":
-      9
+      CompareLevel{}
     case "<>":
-      9
+      CompareLevel{}
     case "<=>":
-      9
+      CompareLevel{}
     case "<":
-      9
+      CompareLevel{}
     case ">":
-      9
+      CompareLevel{}
     case "<=":
-      9
+      CompareLevel{}
     case ">=":
-      9
+      CompareLevel{}
     case "|>":
-      10
+      PipeLevel{}
     case ".":
-      11
+      ConcatLevel{}
     case "<<":
-      12
+      ShiftLevel{}
     case ">>":
-      12
+      ShiftLevel{}
     case "+":
-      13
+      AddLevel{}
     case "-":
-      13
+      AddLevel{}
     case "*":
-      14
+      MultiplyLevel{}
     case "/":
-      14
+      MultiplyLevel{}
     case "%":
-      14
+      MultiplyLevel{}
     case "**":
-      15
+      PowerLevel{}
     case _:
-      L.sel(U32, is_asg(s), u => 3, u => 0)
+      L.sel(BindingLevel, is_asg(s), u => AssignmentLevel{}, u => NoBinary{})
 
-def id_level(s: String) -> U32:
+def id_level(s: String) -> BindingLevel:
   match s:
     case "and":
-      2
+      WordLogicLevel{}
     case "or":
-      2
+      WordLogicLevel{}
     case "xor":
-      2
+      WordLogicLevel{}
     case "instanceof":
-      9
+      CompareLevel{}
     case _:
-      0
+      NoBinary{}
 
-def bin_level(n: T.Node) -> U32:
+def bin_level(n: T.Node) -> BindingLevel:
   match n:
     case T.Leaf{L.Tok{5, s, l}}:
       op_level(s)
     case T.Leaf{L.Tok{1, s, l}}:
       id_level(s)
     case T.Leaf{t}:
-      0
+      NoBinary{}
     case T.Grp{k, l, ks}:
-      0
+      NoBinary{}
 
-# 0 combine to clean, 1 union.
-def level_mode(lv: U32) -> U32:
+def level.rank(lv: BindingLevel) -> U32:
   match lv:
-    case 1:
+    case NoBinary{}:
+      99
+    case ArrowLevel{}:
       1
-    case 5:
-      1
-    case 11:
-      1
-    case _:
-      0
+    case WordLogicLevel{}:
+      2
+    case AssignmentLevel{}:
+      3
+    case TernaryLevel{}:
+      4
+    case CoalesceLevel{}:
+      5
+    case OrLevel{}:
+      6
+    case AndLevel{}:
+      7
+    case BitwiseLevel{}:
+      8
+    case CompareLevel{}:
+      9
+    case PipeLevel{}:
+      10
+    case ConcatLevel{}:
+      11
+    case ShiftLevel{}:
+      12
+    case AddLevel{}:
+      13
+    case MultiplyLevel{}:
+      14
+    case PowerLevel{}:
+      15
 
-def min_level(ns: List<&2, T.Node>, prev: Bool, +best: U32) -> U32:
+def level_mode(lv: BindingLevel) -> PartMode:
+  match lv:
+    case ArrowLevel{}:
+      UnionParts{0}
+    case CoalesceLevel{}:
+      UnionParts{0}
+    case ConcatLevel{}:
+      UnionParts{0}
+    case _:
+      CleanParts{}
+
+def operand.next(n: T.Node) -> OperandContext:
+  L.sel(OperandContext, is_operand(n), u => AfterOperand{}, u => ExpectOperand{})
+
+def operand.level(n: T.Node, context: OperandContext) -> BindingLevel:
+  match context:
+    case ExpectOperand{}:
+      NoBinary{}
+    case AfterOperand{}:
+      bin_level(n)
+
+def min_level(ns: List<&2, T.Node>, context: OperandContext, +best: BindingLevel) -> BindingLevel:
   match ns:
     case Nil{}:
       best
     case Con{+n, rest}:
-      +lv = b2t(prev, bin_level(n))
-      min_level(rest, is_operand(n), L.sel(U32, nz(lv) && U32.is_lt(lv, best), u => lv, u => best))
+      +lv = operand.level(n, context)
+      min_level(rest, operand.next(n), L.sel(BindingLevel, U32.is_lt(level.rank(lv), level.rank(best)), u => lv, u => best))
 
-def at_level(+n: T.Node, prev: Bool, +lv: U32) -> Bool:
-  prev && U32.is_eq(bin_level(n), lv)
+def at_level(+n: T.Node, context: OperandContext, +lv: BindingLevel) -> Bool:
+  match context:
+    case ExpectOperand{}:
+      False{}
+    case AfterOperand{}:
+      U32.is_eq(level.rank(bin_level(n)), level.rank(lv))
 
-def split_level.go(ns: List<&2, T.Node>, +lv: U32, prev: Bool, +cur: List<&2, T.Node>, +acc: List<&2, List<&2, T.Node>>) -> List<&2, List<&2, T.Node>>:
+def split_level.go(ns: List<&2, T.Node>, +lv: BindingLevel, context: OperandContext, +cur: List<&2, T.Node>, +acc: List<&2, List<&2, T.Node>>) -> List<&2, List<&2, T.Node>>:
   match ns:
     case Nil{}:
       List.reverse(&2, List<&2, T.Node>, Con{List.reverse(&2, T.Node, cur), acc})
     case Con{+n, +rest}:
-      L.sel(List<&2, List<&2, T.Node>>, at_level(n, prev, lv), u => split_level.go(rest, lv, False{}, [], Con{List.reverse(&2, T.Node, cur), acc}), u => split_level.go(rest, lv, is_operand(n), Con{n, cur}, acc))
+      L.sel(List<&2, List<&2, T.Node>>, at_level(n, context, lv), u => split_level.go(rest, lv, ExpectOperand{}, [], Con{List.reverse(&2, T.Node, cur), acc}), u => split_level.go(rest, lv, operand.next(n), Con{n, cur}, acc))
 
-def split_level(ns: List<&2, T.Node>, +lv: U32) -> List<&2, List<&2, T.Node>>:
-  split_level.go(ns, lv, False{}, [], [])
+def split_level(ns: List<&2, T.Node>, +lv: BindingLevel) -> List<&2, List<&2, T.Node>>:
+  split_level.go(ns, lv, ExpectOperand{}, [], [])
 
 def split_all.go(ns: List<&2, T.Node>, +text: String, +cur: List<&2, T.Node>, +acc: List<&2, List<&2, T.Node>>) -> List<&2, List<&2, T.Node>>:
   match ns:
@@ -532,7 +668,6 @@ def env.set_all(vs: List<&2, String>, +env: Map<&2, U32>, +t: U32) -> Map<&2, U3
       env.set_all(rest, env.set(env, v, t), t)
 
 # ---------------------------------------------------------------- sources
-
 def server_safe(k: String) -> Bool:
   match k:
     case "REQUEST_METHOD":
@@ -579,31 +714,30 @@ def files_safe(k: String) -> Bool:
     case _:
       False{}
 
-# Taint of a superglobal given the nodes after it; 65535 if not one.
-def sg(name: String, rest: List<&2, T.Node>) -> U32:
+def sg(name: String, rest: List<&2, T.Node>) -> Superglobal:
   match name rest:
     case "_GET" r:
-      SRC()
+      GlobalTaint{SRC()}
     case "_POST" r:
-      SRC()
+      GlobalTaint{SRC()}
     case "_REQUEST" r:
-      SRC()
+      GlobalTaint{SRC()}
     case "_COOKIE" r:
-      SRC()
+      GlobalTaint{SRC()}
     case "_SERVER" Con{T.Grp{91, l, Con{T.Leaf{L.Tok{2, k, l2}}, Nil{}}}, r}:
-      L.sel(U32, server_safe(k), u => 0, u => SRC())
+      GlobalTaint{L.sel(U32, server_safe(k), u => 0, u => SRC())}
     case "_SERVER" r:
-      SRC()
+      GlobalTaint{SRC()}
     case "_FILES" Con{T.Grp{91, l, a}, Con{T.Grp{91, l2, Con{T.Leaf{L.Tok{2, k, l3}}, Nil{}}}, r}}:
-      L.sel(U32, files_safe(k), u => 0, u => SRC())
+      GlobalTaint{L.sel(U32, files_safe(k), u => 0, u => SRC())}
     case "_FILES" r:
-      SRC()
+      GlobalTaint{SRC()}
     case "_ENV" r:
-      0
+      GlobalTaint{0}
     case "GLOBALS" r:
-      0
+      GlobalTaint{0}
     case n r:
-      65535
+      LocalVariable{}
 
 def istr.var(+env: Map<&2, U32>, v: String) -> U32:
   match v:
@@ -627,28 +761,27 @@ def istr.go(vs: List<&2, String>, +env: Map<&2, U32>) -> U32:
     case Nil{}:
       0
     case Con{v, rest}:
-      tor(istr.var(env, v), istr.go(rest, env))
+      taint.join(istr.var(env, v), istr.go(rest, env))
 
 # Interpolated strings hold their variable names, space separated.
 def istr(+env: Map<&2, U32>, text: String) -> U32:
   istr.go(String.split(text, ' '), env)
 
 # ---------------------------------------------------------------- models
-
 def m.unknown() -> Model:
-  Model{0, 0, ALL(), 0, 0, 0}
+  Model{0, 0, ALL(), 0, 0, IgnoreReceiver{}}
 
 def m.clean() -> Model:
-  Model{0, 0, 0, 0, 0, 0}
+  Model{0, 0, 0, 0, 0, IgnoreReceiver{}}
 
 def m.src() -> Model:
-  Model{0, 0, 0, 0, SRC(), 0}
+  Model{0, 0, 0, 0, SRC(), IgnoreReceiver{}}
 
 def m.san(+c: U32) -> Model:
-  Model{0, 0, ALL(), c, 0, 0}
+  Model{0, 0, ALL(), c, 0, IgnoreReceiver{}}
 
 def m.sink(+c: U32, +sa: U32, +ra: U32) -> Model:
-  Model{c, sa, ra, 0, 0, 0}
+  Model{c, sa, ra, 0, 0, IgnoreReceiver{}}
 
 def XSS_SAFE() -> U32:
   264
@@ -881,7 +1014,7 @@ def mmodel.name(+name: String) -> Model:
     case "escape":
       m.san(1)
     case _:
-      L.sel(Model, raw_method(name), u => m.sink(1, 1, ALL()), u => Model{0, 0, ALL(), 0, 0, 1})
+      L.sel(Model, raw_method(name), u => m.sink(1, 1, ALL()), u => Model{0, 0, ALL(), 0, 0, PropagateReceiver{}})
 
 def mmodel(+name: String, cls: String) -> Model:
   L.sel(Model, request_recv(cls), u => m.src(), u => mmodel.name(name))
@@ -896,9 +1029,6 @@ def smodel(cls: String, +name: String) -> Model:
       mmodel.name(name)
 
 # Calls whose meaning depends on literal arguments.
-#   1 result is request input  2 result is clean  4 curl_setopt URL
-#   5 dispatch to a literal callback  6 parse_str into the local scope
-#   8 parse_str into a result array
 def first_str(ps: List<&2, List<&2, T.Node>>) -> String:
   match ps:
     case Con{Con{T.Leaf{L.Tok{2, s, l}}, Nil{}}, r}:
@@ -940,69 +1070,93 @@ def last_str(ns: List<&2, T.Node>, +acc: String) -> String:
     case Con{n, rest}:
       last_str(rest, acc)
 
-# The function name a literal callback refers to, or "".
-def cb_name(ps: List<&2, List<&2, T.Node>>) -> String:
+def callback.method(+name: String) -> CallbackTarget:
+  L.sel(CallbackTarget, String.is_empty(name), u => UnknownCallback{}, u => MethodCallback{String.to_lower(name)})
+
+def callback.function(+name: String) -> CallbackTarget:
+  L.sel(CallbackTarget, String.is_empty(name), u => UnknownCallback{}, u => L.sel(CallbackTarget, String.starts_with(name, "->"), v => callback.method(String.drop(name, 2n)), v => FunctionCallback{String.to_lower(name)}))
+
+def cb_name(ps: List<&2, List<&2, T.Node>>) -> CallbackTarget:
   match ps:
     case Con{Con{T.Leaf{L.Tok{2, s, l}}, Nil{}}, r}:
-      String.to_lower(s)
+      callback.function(s)
     case Con{Con{T.Grp{91, l, ks}, Nil{}}, r}:
-      "->" ++ String.to_lower(last_str(ks, ""))
+      callback.method(last_str(ks, ""))
     case Con{Con{T.Leaf{L.Tok{1, "array", l}}, Con{T.Grp{40, l2, ks}, Nil{}}}, r}:
-      "->" ++ String.to_lower(last_str(ks, ""))
+      callback.method(last_str(ks, ""))
     case _:
-      ""
+      UnknownCallback{}
 
-def spec.fn(name: String, +ps: List<&2, List<&2, T.Node>>) -> U32:
+def callback.special(target: CallbackTarget) -> CallSpecial:
+  match target:
+    case UnknownCallback{}:
+      OrdinaryCall{}
+    case FunctionCallback{name}:
+      CallbackCall{FunctionCallback{name}}
+    case MethodCallback{name}:
+      CallbackCall{MethodCallback{name}}
+
+def spec.fn(name: String, +ps: List<&2, List<&2, T.Node>>) -> CallSpecial:
   match name:
     case "file_get_contents":
-      L.sel(U32, input_wrapper(first_str(ps)), u => 1, u => 0)
+      L.sel(CallSpecial, input_wrapper(first_str(ps)), u => RequestCall{}, u => OrdinaryCall{})
     case "fopen":
-      L.sel(U32, input_wrapper(first_str(ps)), u => 1, u => 0)
+      L.sel(CallSpecial, input_wrapper(first_str(ps)), u => RequestCall{}, u => OrdinaryCall{})
     case "file":
-      L.sel(U32, input_wrapper(first_str(ps)), u => 1, u => 0)
+      L.sel(CallSpecial, input_wrapper(first_str(ps)), u => RequestCall{}, u => OrdinaryCall{})
     case "filter_input":
-      L.sel(U32, has_validate(List.concat(&2, T.Node, ps)), u => 2, u => 1)
+      L.sel(CallSpecial, has_validate(List.concat(&2, T.Node, ps)), u => CleanCall{}, u => RequestCall{})
     case "filter_var":
-      L.sel(U32, has_validate(List.concat(&2, T.Node, ps)), u => 2, u => 0)
+      L.sel(CallSpecial, has_validate(List.concat(&2, T.Node, ps)), u => CleanCall{}, u => OrdinaryCall{})
     case "filter_input_array":
-      1
+      RequestCall{}
     case "curl_setopt":
-      L.sel(U32, nth_is_id(ps, 1n, "curlopt_url"), u => 4, u => 0)
+      L.sel(CallSpecial, nth_is_id(ps, 1n, "curlopt_url"), u => CurlUrlCall{}, u => OrdinaryCall{})
     case "call_user_func":
-      L.sel(U32, String.is_empty(cb_name(ps)) || String.eq(cb_name(ps), "->"), u => 0, u => 5)
+      callback.special(cb_name(ps))
     case "call_user_func_array":
-      L.sel(U32, String.is_empty(cb_name(ps)) || String.eq(cb_name(ps), "->"), u => 0, u => 5)
+      callback.special(cb_name(ps))
     case "parse_str":
-      L.sel(U32, U32.is_eq(U32.from_nat(List.length(&2, List<&2, T.Node>, ps)), 1), u => 6, u => L.sel(U32, U32.is_eq(U32.from_nat(List.length(&2, List<&2, T.Node>, ps)), 2), v => 8, v => 0))
+      L.sel(CallSpecial, U32.is_eq(U32.from_nat(List.length(&2, List<&2, T.Node>, ps)), 1), u => ParseStrScope{}, u => L.sel(CallSpecial, U32.is_eq(U32.from_nat(List.length(&2, List<&2, T.Node>, ps)), 2), v => ParseStrOutput{}, v => OrdinaryCall{}))
     case "html_entity_decode":
-      7
+      DecoderCall{}
     case "htmlspecialchars_decode":
-      7
+      DecoderCall{}
     case "wp_kses_decode_entities":
-      7
+      DecoderCall{}
     case _:
-      0
+      OrdinaryCall{}
 
-def spec(+kind: U32, +name: String, +ps: List<&2, List<&2, T.Node>>) -> U32:
-  L.sel(U32, U32.is_ne(kind, 0), u => 0, u => spec.fn(name, ps))
+def spec(kind: CallKind, name: String, ps: List<&2, List<&2, T.Node>>) -> CallSpecial:
+  match kind:
+    case FunctionCall{}:
+      spec.fn(name, ps)
+    case _:
+      OrdinaryCall{}
 
 # ---------------------------------------------------------------- calls
-
 def m.known(m: Model) -> Bool:
   match m:
     case Model{sc, sa, ra, clr, src, rcv}:
       nz(sc) || nz(clr) || nz(src) || Bool.not(U32.is_eq(ra, ALL()))
 
+def receiver.taint(policy: ReceiverPolicy, value: U32) -> U32:
+  match policy:
+    case IgnoreReceiver{}:
+      0
+    case PropagateReceiver{}:
+      value
+
 def model_apply(m: Model, +ts: List<&2, U32>, +rv: U32, st: St, +line: U32, +name: String) -> Res:
   match m:
     case Model{sc, sa, ra, clr, src, rcv}:
-      Res{tor(tor(tclr(mask_or(ts, ra), clr), src), b2t(nz(rcv), rv)), [], st.find(st, line, sink.bits(mask_or(ts, sa), sc), name)}
+      Res{taint.join(taint.join(taint.sanitize(mask_or(ts, ra), clr), src), receiver.taint(rcv, rv)), [], st.find(st, line, sink.bits(mask_or(ts, sa), sc), name)}
 
 # OR over i of ts[i] & ms[i].
 def zip_or(ts: List<&2, U32>, ms: List<&2, U32>) -> U32:
   match ts ms:
     case Con{t, tr} Con{m, mr}:
-      tor(U32.and(t, m), zip_or(tr, mr))
+      taint.join(U32.and(t, m), zip_or(tr, mr))
     case a b:
       0
 
@@ -1011,7 +1165,7 @@ def zip_or(ts: List<&2, U32>, ms: List<&2, U32>) -> U32:
 def zip_revived(ts: List<&2, U32>, revived: List<&2, U32>) -> U32:
   match ts revived:
     case Con{t, tr} Con{r, rr}:
-      tor(b2t(nz(U32.and(t, SRC())), r), zip_revived(tr, rr))
+      taint.join(b2t(nz(U32.and(t, SRC())), r), zip_revived(tr, rr))
     case a b:
       0
 
@@ -1022,8 +1176,8 @@ def sum_apply(s: Sum, +m: Model, +ts: List<&2, U32>, +rv: U32, st: St, +line: U3
     case Sum{src, props, sinks, revived}:
       +normal = zip_or(ts, sinks)
       +restored = zip_revived(ts, revived)
-      +hits = U32.or(normal, U32.shln(restored, 10n))
-      Res{tor(src, zip_or(ts, props)), [], st.find(st, line, hits, name ++ "()")}
+      +hits = {SinkFlow{normal, restored} : SinkFlow}
+      Res{taint.join(src, zip_or(ts, props)), [], st.find(st, line, hits, name ++ "()")}
 
 # Builtin models win for methods (query, prepare, ...) unless unknown.
 def meth_apply(+m: Model, s: Sum, +ts: List<&2, U32>, +rv: U32, +st: St, +line: U32, +name: String) -> Res:
@@ -1032,23 +1186,36 @@ def meth_apply(+m: Model, s: Sum, +ts: List<&2, U32>, +rv: U32, +st: St, +line: 
 def cb_model(m: Model, +u: U32) -> U32:
   match m:
     case Model{sc, sa, ra, clr, src, rcv}:
-      tor(tclr(b2t(nz(ra), u), clr), src)
+      taint.join(taint.sanitize(b2t(nz(ra), u), clr), src)
 
 def cb_sum(s: Sum, m: Model, +u: U32) -> U32:
   match s:
     case NoSum{}:
       cb_model(m, u)
     case Sum{src, props, sinks, revived}:
-      tor(src, U32.and(u, or_list(props)))
+      taint.join(src, U32.and(u, or_list(props)))
 
-def cb_mod(+cb: String) -> Model:
-  L.sel(Model, String.starts_with(cb, "->"), u => mmodel.name(String.drop(cb, 2n)), u => fmodel(cb))
+def cb_mod(target: CallbackTarget) -> Model:
+  match target:
+    case FunctionCallback{name}:
+      fmodel(name)
+    case MethodCallback{name}:
+      mmodel.name(name)
+    case UnknownCallback{}:
+      m.unknown()
 
-# Taint returned by a call through a literal callback, given the OR of the
-# arguments passed on to it.
-def cb_apply(+cb: String, +u: U32, +cx: Map<&2, Sum>) -> U32:
-  +mo = cb_mod(cb)
-  L.sel(U32, m.known(mo), u2 => cb_model(mo, u), u2 => cb_sum(sum.get(cx, cb), mo, u))
+def callback.key(target: CallbackTarget) -> String:
+  match target:
+    case FunctionCallback{name}:
+      name
+    case MethodCallback{name}:
+      "->" ++ name
+    case UnknownCallback{}:
+      ""
+
+def cb_apply(+target: CallbackTarget, +u: U32, +cx: Map<&2, Sum>) -> U32:
+  +mo = cb_mod(target)
+  L.sel(U32, m.known(mo), u2 => cb_model(mo, u), u2 => cb_sum(sum.get(cx, callback.key(target)), mo, u))
 
 def parse_str_result(+args: List<&2, List<&2, T.Node>>, +ts: List<&2, U32>, st: St) -> Res:
   match args ts st:
@@ -1059,49 +1226,44 @@ def parse_str_result(+args: List<&2, List<&2, T.Node>>, +ts: List<&2, U32>, st: 
 
 def call_apply(ci: CallI, +ts: List<&2, U32>, +st: St, +cx: Map<&2, Sum>) -> Res:
   match ci:
-    case CallI{k, n, c, l, rv, 1, cb, a, r}:
+    case CallI{k, n, c, l, rv, RequestCall{}, a, r}:
       Res{SRC(), [], st}
-    case CallI{k, n, c, l, rv, 2, cb, a, r}:
+    case CallI{k, n, c, l, rv, CleanCall{}, a, r}:
       Res{0, [], st}
-    case CallI{k, n, c, l, rv, 4, cb, a, r}:
+    case CallI{k, n, c, l, rv, CurlUrlCall{}, a, r}:
       Res{0, [], st.find(st, l, sink.bits(mask_or(ts, 4), 64), "curl_setopt")}
-    case CallI{k, n, c, l, rv, 5, cb, a, r}:
+    case CallI{k, n, c, l, rv, CallbackCall{cb}, a, r}:
       Res{cb_apply(cb, or_list(tail(ts)), cx), [], st}
-    case CallI{k, n, c, l, rv, 6, cb, a, r}:
+    case CallI{k, n, c, l, rv, ParseStrScope{}, a, r}:
       model_apply(m.sink(512, 1, 0), ts, rv, st, l, n)
-    # Decoding restores classes, and marks summary flows for restored sinks.
-    case CallI{k, n, c, l, rv, 8, cb, a, r}:
+    case CallI{k, n, c, l, rv, ParseStrOutput{}, a, r}:
       parse_str_result(args_of(a), ts, st)
-    case CallI{k, n, c, l, rv, 7, cb, a, r}:
-      +taint = mask_or(ts, 1)
-      +out = b2t(nz(U32.and(taint, SRC())), SRC())
-      +restored = b2t(nz(U32.and(taint, SUMMARY_MARKER())), RESTORED())
-      Res{U32.or(out, restored), [], st}
-    case CallI{0, +n, c, l, rv, s, cb, a, r}:
+    case CallI{k, n, c, l, rv, DecoderCall{}, a, r}:
+      Res{taint.decode(mask_or(ts, 1)), [], st}
+    case CallI{FunctionCall{}, +n, c, l, rv, s, a, r}:
       sum_apply(sum.get(cx, n), fmodel(n), ts, rv, st, l, n)
-    case CallI{1, +n, c, l, rv, s, cb, a, r}:
+    case CallI{MethodCall{}, +n, c, l, rv, s, a, r}:
       meth_apply(mmodel(n, c), sum.get(cx, "->" ++ n), ts, rv, st, l, "->" ++ n)
-    case CallI{2, +n, c, l, rv, s, cb, a, r}:
+    case CallI{StaticCall{}, +n, c, l, rv, s, a, r}:
       meth_apply(smodel(c, n), sum.get(cx, "->" ++ n), ts, rv, st, l, "::" ++ n)
-    case CallI{k, n, c, l, rv, s, cb, a, r}:
+    case CallI{k, n, c, l, rv, s, a, r}:
       Res{or_list(ts), [], st.find(st, l, sink.bits(rv, 4), "dynamic call")}
 
-def mk_call(+kind: U32, +name: String, cls: String, line: U32, recv: U32, +args: List<&2, T.Node>, rest: List<&2, T.Node>) -> CallI:
+def mk_call(+kind: CallKind, +name: String, cls: String, line: U32, recv: U32, +args: List<&2, T.Node>, rest: List<&2, T.Node>) -> CallI:
   +ps = args_of(args)
-  CallI{kind, name, cls, line, recv, spec(kind, name, ps), cb_name(ps), args, rest}
+  CallI{kind, name, cls, line, recv, spec(kind, name, ps), args, rest}
 
 def ci_args(ci: CallI) -> List<&2, T.Node>:
   match ci:
-    case CallI{k, n, c, l, rv, s, cb, a, r}:
+    case CallI{k, n, c, l, rv, s, a, r}:
       a
 
 def ci_rest(ci: CallI) -> List<&2, T.Node>:
   match ci:
-    case CallI{k, n, c, l, rv, s, cb, a, r}:
+    case CallI{k, n, c, l, rv, s, a, r}:
       r
 
 # ---------------------------------------------------------------- shapes
-
 def two.b(t: Two) -> List<&2, T.Node>:
   match t:
     case Two{a, b}:
@@ -1150,12 +1312,32 @@ def int_cast(c: String) -> Bool:
     case _:
       False{}
 
-def var_t(+name: String, rest: List<&2, T.Node>, +env: Map<&2, U32>) -> U32:
-  +g = sg(name, rest)
-  L.sel(U32, U32.is_eq(g, 65535), u => env.get(env, name, 0), u => g)
+def var.lookup(global: Superglobal, env: Map<&2, U32>, name: String) -> U32:
+  match global:
+    case LocalVariable{}:
+      env.get(env, name, 0)
+    case GlobalTaint{taint}:
+      taint
 
-def pkey(+path: String, pr: String) -> String:
-  L.sel(String, String.is_empty(path), u => "", u => path ++ "->" ++ pr)
+def var_t(+name: String, rest: List<&2, T.Node>, +env: Map<&2, U32>) -> U32:
+  var.lookup(sg(name, rest), env, name)
+
+def storage.start(+key: String) -> StorageIdentity:
+  L.sel(StorageIdentity, String.is_empty(key), u => NoStorage{}, u => Storage{key})
+
+def storage.key(identity: StorageIdentity) -> String:
+  match identity:
+    case NoStorage{}:
+      ""
+    case Storage{key}:
+      key
+
+def pkey(identity: StorageIdentity, pr: String) -> StorageIdentity:
+  match identity:
+    case NoStorage{}:
+      NoStorage{}
+    case Storage{key}:
+      Storage{key ++ "->" ++ pr}
 
 # `new X(args) rest`: the constructor arguments and a member chain, if any.
 def new_split(ns: List<&2, T.Node>) -> Two:
@@ -1190,9 +1372,9 @@ def asg_val(op: String, +old: U32, +t: U32) -> U32:
     case "=":
       t
     case ".=":
-      tor(old, t)
+      taint.join(old, t)
     case "??=":
-      tor(old, t)
+      taint.join(old, t)
     case _:
       old
 
@@ -1216,9 +1398,9 @@ def assign(lhs: List<&2, T.Node>, +op: String, +t: U32, +env: Map<&2, U32>) -> M
       env.set(env, k, asg_val(op, env.get(env, k, 0), t))
     case Con{T.Leaf{L.Tok{0, v, l}}, Con{T.Leaf{L.Tok{5, "->", l2}}, Con{T.Leaf{L.Tok{1, pr, l3}}, more}}}:
       +k = v ++ "->" ++ pr
-      env.set(env, k, tor(env.get(env, k, 0), asg_weak(op, t)))
+      env.set(env, k, taint.join(env.get(env, k, 0), asg_weak(op, t)))
     case Con{T.Leaf{L.Tok{0, +v, l}}, more}:
-      env.set(env, v, tor(env.get(env, v, 0), asg_weak(op, t)))
+      env.set(env, v, taint.join(env.get(env, v, 0), asg_weak(op, t)))
     case Con{T.Grp{91, l, ks}, Nil{}}:
       env.set_all(vars_in(ks, []), env, t)
     case Con{T.Leaf{L.Tok{1, "list", l}}, Con{T.Grp{40, l2, ks}, Nil{}}}:
@@ -1231,45 +1413,49 @@ def asg_st(lhs: List<&2, T.Node>, +op: String, +t: U32, st: St) -> Res:
     case St{env, fs, ret, revived}:
       Res{t, [], St{assign(lhs, op, t, env), fs, ret, revived}}
 
-# How an expression starts:
-#   100 empty  110 print  111 include/require  112 yield/throw  102 closure
-#   otherwise the loosest binary operator level, 0 for a primary.
-def lead_kw(+s: String, +ns: List<&2, T.Node>) -> U32:
+type ExpressionStart is Data:
+  EmptyExpression{}
+  PrintExpression{}
+  IncludeExpression{}
+  ForwardExpression{}
+  ClosureExpression{}
+  BinaryExpression{level: BindingLevel}
+
+def lead_kw(s: String, ns: List<&2, T.Node>) -> ExpressionStart:
   match s:
     case "print":
-      110
+      PrintExpression{}
     case "include":
-      111
+      IncludeExpression{}
     case "include_once":
-      111
+      IncludeExpression{}
     case "require":
-      111
+      IncludeExpression{}
     case "require_once":
-      111
+      IncludeExpression{}
     case "yield":
-      112
+      ForwardExpression{}
     case "throw":
-      112
+      ForwardExpression{}
     case "fn":
-      102
+      ClosureExpression{}
     case "function":
-      102
+      ClosureExpression{}
     case _:
-      L.sel(U32, U32.is_eq(min_level(ns, False{}, 99), 99), u => 0, u => min_level(ns, False{}, 99))
+      BinaryExpression{min_level(ns, ExpectOperand{}, NoBinary{})}
 
-def lead(ns: List<&2, T.Node>) -> U32:
+def lead(ns: List<&2, T.Node>) -> ExpressionStart:
   match ns:
     case Nil{}:
-      100
+      EmptyExpression{}
     case Con{T.Leaf{L.Tok{1, "static", l}}, Con{T.Leaf{L.Tok{1, "fn", l2}}, rest}}:
-      102
+      ClosureExpression{}
     case Con{T.Leaf{L.Tok{1, "static", l}}, Con{T.Leaf{L.Tok{1, "function", l2}}, rest}}:
-      102
+      ClosureExpression{}
     case Con{T.Leaf{L.Tok{1, +s, l}}, rest}:
       lead_kw(s, Con{T.Leaf{L.Tok{1, s, l}}, rest})
-    case +ns2:
-      +lv = min_level(ns2, False{}, 99)
-      L.sel(U32, U32.is_eq(lv, 99), u => 0, u => lv)
+    case ns2:
+      BinaryExpression{min_level(ns2, ExpectOperand{}, NoBinary{})}
 
 def for_parts(xs: List<&2, List<&2, T.Node>>) -> List<&2, List<&2, T.Node>>:
   match xs:
@@ -1278,121 +1464,151 @@ def for_parts(xs: List<&2, List<&2, T.Node>>) -> List<&2, List<&2, T.Node>>:
     case Con{x, rest}:
       List.append(&2, List<&2, T.Node>, args_of(x), for_parts(rest))
 
-# Statement kinds, see StmtsD.
-def kw_kind(s: String) -> U32:
+type StatementKind is Data:
+  EndStatements{}
+  SkipStatementToken{}
+  BlockStatement{}
+  EchoStatement{}
+  ReturnStatement{}
+  ConditionStatement{}
+  ForStatement{}
+  ForeachStatement{}
+  BodyStatement{}
+  CaseStatement{}
+  FunctionStatement{}
+  ClassStatement{}
+  NamespaceStatement{}
+  SkipStatement{}
+  ExpressionStatement{}
+  OpaqueHeaderStatement{}
+  DefaultStatement{}
+
+def kw_kind(s: String) -> StatementKind:
   match s:
     case "echo":
-      3
+      EchoStatement{}
     case "return":
-      4
+      ReturnStatement{}
     case "if":
-      5
+      ConditionStatement{}
     case "elseif":
-      5
+      ConditionStatement{}
     case "while":
-      5
+      ConditionStatement{}
     case "switch":
-      5
+      ConditionStatement{}
     case "for":
-      6
+      ForStatement{}
     case "foreach":
-      7
+      ForeachStatement{}
     case "else":
-      8
+      BodyStatement{}
     case "do":
-      8
+      BodyStatement{}
     case "try":
-      8
+      BodyStatement{}
     case "finally":
-      8
+      BodyStatement{}
     case "case":
-      9
+      CaseStatement{}
     case "class":
-      11
+      ClassStatement{}
     case "interface":
-      11
+      ClassStatement{}
     case "trait":
-      11
+      ClassStatement{}
     case "enum":
-      11
+      ClassStatement{}
     case "abstract":
-      1
+      SkipStatementToken{}
     case "final":
-      1
+      SkipStatementToken{}
     case "readonly":
-      1
+      SkipStatementToken{}
     case "namespace":
-      12
+      NamespaceStatement{}
     case "use":
-      13
+      SkipStatement{}
     case "global":
-      13
+      SkipStatement{}
     case "const":
-      13
+      SkipStatement{}
     case "break":
-      13
+      SkipStatement{}
     case "continue":
-      13
+      SkipStatement{}
     case "goto":
-      13
+      SkipStatement{}
     case "endif":
-      13
+      SkipStatement{}
     case "endwhile":
-      13
+      SkipStatement{}
     case "endfor":
-      13
+      SkipStatement{}
     case "endforeach":
-      13
+      SkipStatement{}
     case "endswitch":
-      13
+      SkipStatement{}
     case "enddeclare":
-      13
+      SkipStatement{}
     case "catch":
-      15
+      OpaqueHeaderStatement{}
     case "declare":
-      15
+      OpaqueHeaderStatement{}
     case "default":
-      16
+      DefaultStatement{}
     case _:
-      14
+      ExpressionStatement{}
 
-def stmt_kind(ns: List<&2, T.Node>) -> U32:
+def stmt_kind(ns: List<&2, T.Node>) -> StatementKind:
   match ns:
     case Nil{}:
-      0
+      EndStatements{}
     case Con{T.Leaf{L.Tok{5, ";", l}}, r}:
-      1
+      SkipStatementToken{}
     case Con{T.Grp{35, l, ks}, r}:
-      1
+      SkipStatementToken{}
     case Con{T.Grp{123, l, ks}, r}:
-      2
+      BlockStatement{}
     case Con{T.Leaf{L.Tok{1, "function", l}}, Con{T.Leaf{L.Tok{1, n, l2}}, r}}:
-      10
+      FunctionStatement{}
     case Con{T.Leaf{L.Tok{1, "function", l}}, Con{T.Leaf{L.Tok{5, "&", l2}}, Con{T.Leaf{L.Tok{1, n, l3}}, r}}}:
-      10
+      FunctionStatement{}
     case Con{T.Leaf{L.Tok{1, "static", l}}, Con{T.Leaf{L.Tok{0, n, l2}}, r}}:
-      1
+      SkipStatementToken{}
     case Con{T.Leaf{L.Tok{1, kw, l}}, r}:
       kw_kind(kw)
     case _:
-      14
+      ExpressionStatement{}
 
-# Body after a control header: 0 block, 1 skip a token, 2 statement keyword,
-# 3 a single expression statement, 4 nothing.
-def body_kind(ns: List<&2, T.Node>) -> U32:
+type BodyKind is Data:
+  BracedBody{}
+  SkipBodyToken{}
+  KeywordBody{}
+  ExpressionBody{}
+  EmptyBody{}
+
+def body.keyword(kind: StatementKind) -> BodyKind:
+  match kind:
+    case ExpressionStatement{}:
+      ExpressionBody{}
+    case _:
+      KeywordBody{}
+
+def body_kind(ns: List<&2, T.Node>) -> BodyKind:
   match ns:
     case Nil{}:
-      4
+      EmptyBody{}
     case Con{T.Grp{123, l, ks}, r}:
-      0
+      BracedBody{}
     case Con{T.Leaf{L.Tok{5, ":", l}}, r}:
-      1
+      SkipBodyToken{}
     case Con{T.Leaf{L.Tok{5, ";", l}}, r}:
-      1
+      SkipBodyToken{}
     case Con{T.Leaf{L.Tok{1, kw, l}}, r}:
-      L.sel(U32, U32.is_eq(kw_kind(kw), 14), u => 3, u => 2)
+      body.keyword(kw_kind(kw))
     case _:
-      3
+      ExpressionBody{}
 
 # Skip a declaration: up to and including its `{..}` body, or its `;`.
 def skip_brace(ns: List<&2, T.Node>) -> List<&2, T.Node>:
@@ -1425,10 +1641,10 @@ type Kont is Data:
   KOr{t: U32}
   KAsg{lhs: List<&2, T.Node>, op: String}
   KTern{a: List<&2, T.Node>, b: List<&2, T.Node>}
-  KParts{mode: U32, ps: List<&2, List<&2, T.Node>>, acc: U32}
+  KParts{mode: PartMode, ps: List<&2, List<&2, T.Node>>}
   KArgs{ps: List<&2, List<&2, T.Node>>, acc: List<&2, U32>}
   KPipe{ps: List<&2, List<&2, T.Node>>, line: U32}
-  KPost{path: String, ns: List<&2, T.Node>}
+  KPost{path: StorageIdentity, ns: List<&2, T.Node>}
   KPostI{t: U32, ns: List<&2, T.Node>}
   KCall{ci: CallI}
   KClo{env: Map<&2, U32>, ret: U32}
@@ -1439,18 +1655,17 @@ type Kont is Data:
   KRet{}
 
 # ---------------------------------------------------------------- analyzer
-
 type Job is Data:
   JDone{r: Res}
   JThen{j: Job, k: Kont}
   Ex{ns: List<&2, T.Node>, st: St}
   Prim{ns: List<&2, T.Node>, st: St}
-  Post{t: U32, path: String, ns: List<&2, T.Node>, st: St}
+  Post{t: U32, path: StorageIdentity, ns: List<&2, T.Node>, st: St}
   Call{ci: CallI, st: St}
-  Parts{mode: U32, ps: List<&2, List<&2, T.Node>>, st: St, acc: U32}
+  Parts{mode: PartMode, ps: List<&2, List<&2, T.Node>>, st: St}
   Args{ps: List<&2, List<&2, T.Node>>, st: St, acc: List<&2, U32>}
   PipeS{ps: List<&2, List<&2, T.Node>>, line: U32, st: St}
-  PipeC{name: String, part: List<&2, T.Node>, t: U32, st: St, line: U32}
+  PipeC{target: PipeTarget, part: List<&2, T.Node>, t: U32, st: St, line: U32}
   Stmts{ns: List<&2, T.Node>, st: St}
   Block{ns: List<&2, T.Node>, st: St}
   Body{ns: List<&2, T.Node>, st: St}
@@ -1487,20 +1702,33 @@ def drop1(ns: List<&2, T.Node>) -> List<&2, T.Node>:
     case Con{n, rest}:
       rest
 
-# A `name(...)` first-class callable in a pipe, or "".
-def pipe_name(ns: List<&2, T.Node>) -> String:
+def pipe_name(ns: List<&2, T.Node>) -> PipeTarget:
   match ns:
-    case Con{T.Leaf{L.Tok{1, n, l}}, Con{T.Grp{40, l2, Con{T.Leaf{L.Tok{5, "...", l3}}, Nil{}}}, Nil{}}}:
-      n
+    case Con{T.Leaf{L.Tok{1, +n, l}}, Con{T.Grp{40, l2, Con{T.Leaf{L.Tok{5, "...", l3}}, Nil{}}}, Nil{}}}:
+      L.sel(PipeTarget, String.is_empty(n), u => UnknownPipe{}, u => NamedPipe{n})
     case _:
-      ""
+      UnknownPipe{}
+
+def parts.result(mode: PartMode) -> U32:
+  match mode:
+    case CleanParts{}:
+      0
+    case UnionParts{acc}:
+      acc
+
+def parts.add(mode: PartMode, value: U32) -> PartMode:
+  match mode:
+    case CleanParts{}:
+      CleanParts{}
+    case UnionParts{acc}:
+      UnionParts{taint.join(acc, value)}
 
 def k.tern(a: List<&2, T.Node>, b: List<&2, T.Node>, t: U32, st: St) -> Job:
   match a:
     case Nil{}:
-      Parts{1, [b], st, t}
+      Parts{UnionParts{t}, [b], st}
     case Con{x, xs}:
-      Parts{1, [Con{x, xs}, b], st, 0}
+      Parts{UnionParts{0}, [Con{x, xs}, b], st}
 
 def k.pipe(ps: List<&2, List<&2, T.Node>>, +line: U32, +t: U32, st: St) -> Job:
   match ps:
@@ -1518,13 +1746,13 @@ def step_k(r: Res, k: Kont, +cx: Map<&2, Sum>) -> Job:
         case KMask{m}:
           JDone{Res{U32.and(t, m), [], st}}
         case KOr{t2}:
-          JDone{Res{tor(t, t2), [], st}}
+          JDone{Res{taint.join(t, t2), [], st}}
         case KAsg{lhs, op}:
           JDone{asg_st(lhs, op, t, st)}
         case KTern{a, b}:
           k.tern(a, b, t, st)
-        case KParts{mode, ps, acc}:
-          Parts{mode, ps, st, tor(acc, t)}
+        case KParts{mode, ps}:
+          Parts{parts.add(mode, t), ps, st}
         case KArgs{ps, acc}:
           Args{ps, st, Con{t, acc}}
         case KPipe{ps, line}:
@@ -1532,9 +1760,9 @@ def step_k(r: Res, k: Kont, +cx: Map<&2, Sum>) -> Job:
         case KPost{path, ns}:
           Post{t, path, ns, st}
         case KPostI{t0, ns}:
-          Post{t0, "", ns, st}
+          Post{t0, NoStorage{}, ns, st}
         case KCall{+ci}:
-          JThen{JDone{call_apply(ci, ts, st, cx)}, KPost{"", ci_rest(ci)}}
+          JThen{JDone{call_apply(ci, ts, st, cx)}, KPost{NoStorage{}, ci_rest(ci)}}
         case KClo{env, ret}:
           JDone{Res{0, [], st.restore(env, ret, st)}}
         case KStmts{ns}:
@@ -1568,32 +1796,34 @@ def j.clo(two: Two, +st: St) -> Job:
 def j.new(two: Two, st: St) -> Job:
   match two:
     case Two{args, after}:
-      JThen{JThen{Args{args_of(args), st, []}, KMask{0}}, KPost{"", after}}
+      JThen{JThen{Args{args_of(args), st, []}, KMask{0}}, KPost{NoStorage{}, after}}
 
-def j.exl(ns: List<&2, T.Node>, +code: U32, st: St) -> Job:
+def j.exl(ns: List<&2, T.Node>, code: ExpressionStart, st: St) -> Job:
   match ns:
     case Nil{}:
       JDone{Res{0, [], st}}
     case Con{+h, +rest}:
       match code:
-        case 110:
+        case PrintExpression{}:
           JThen{Ex{rest, st}, KSink{8, node_line(h), "print"}}
-        case 111:
+        case IncludeExpression{}:
           JThen{Ex{rest, st}, KSink{32, node_line(h), "include"}}
-        case 112:
+        case ForwardExpression{}:
           Ex{rest, st}
-        case 102:
+        case ClosureExpression{}:
           j.clo(clo_split(Con{h, rest}), st)
-        case 3:
+        case BinaryExpression{AssignmentLevel{}}:
           j.asg(split_asg(Con{h, rest}), st)
-        case 4:
+        case BinaryExpression{TernaryLevel{}}:
           j.tern(tern.split(split_at(Con{h, rest}, 5, "?")), st)
-        case 10:
-          PipeS{split_level(Con{h, rest}, 10), node_line(h), st}
-        case 0:
+        case BinaryExpression{PipeLevel{}}:
+          PipeS{split_level(Con{h, rest}, PipeLevel{}), node_line(h), st}
+        case BinaryExpression{NoBinary{}}:
           Prim{Con{h, rest}, st}
-        case _:
-          Parts{level_mode(code), split_level(Con{h, rest}, code), st, 0}
+        case BinaryExpression{+lv}:
+          Parts{level_mode(lv), split_level(Con{h, rest}, lv), st}
+        case EmptyExpression{}:
+          JDone{Res{0, [], st}}
 
 # Token kind of a leaf (0..8) or bracket kind of a group (35, 40, 91, 123).
 def node_code(n: T.Node) -> U32:
@@ -1610,87 +1840,100 @@ def leaf_text(n: T.Node) -> String:
     case T.Grp{k, l, ks}:
       ""
 
-def id_code(s: String) -> U32:
+type IdentifierKind is Data:
+  OrdinaryIdentifier{}
+  NewIdentifier{}
+  CloneIdentifier{}
+  MatchIdentifier{}
+  ArrayIdentifier{}
+  IssetIdentifier{}
+
+def id_code(s: String) -> IdentifierKind:
   match s:
     case "new":
-      1
+      NewIdentifier{}
     case "clone":
-      2
+      CloneIdentifier{}
     case "match":
-      3
+      MatchIdentifier{}
     case "array":
-      4
+      ArrayIdentifier{}
     case "list":
-      4
+      ArrayIdentifier{}
     case "isset":
-      5
+      IssetIdentifier{}
     case "empty":
-      5
+      IssetIdentifier{}
     case _:
-      0
+      OrdinaryIdentifier{}
 
-def arrow_code(s: String) -> U32:
+type PostfixKind is Data:
+  OtherPostfix{}
+  PropertyPostfix{}
+  StaticPostfix{}
+
+def arrow_code(s: String) -> PostfixKind:
   match s:
     case "->":
-      1
+      PropertyPostfix{}
     case "?->":
-      1
+      PropertyPostfix{}
     case "::":
-      2
+      StaticPostfix{}
     case _:
-      0
+      OtherPostfix{}
 
 def j.match(rest: List<&2, T.Node>, st: St) -> Job:
   match rest:
     case Con{T.Grp{40, l2, c}, Con{T.Grp{123, l3, arms}, r}}:
-      JThen{Parts{1, Con{c, args_of(arms)}, st, 0}, KPost{"", r}}
+      JThen{Parts{UnionParts{0}, Con{c, args_of(arms)}, st}, KPost{NoStorage{}, r}}
     case other:
-      Post{0, "", other, st}
+      Post{0, NoStorage{}, other, st}
 
 def j.arr(rest: List<&2, T.Node>, st: St) -> Job:
   match rest:
     case Con{T.Grp{40, l2, ks}, r}:
-      JThen{Parts{1, args_of(ks), st, 0}, KPost{"", r}}
+      JThen{Parts{UnionParts{0}, args_of(ks), st}, KPost{NoStorage{}, r}}
     case other:
-      Post{0, "", other, st}
+      Post{0, NoStorage{}, other, st}
 
 def j.isset(rest: List<&2, T.Node>, st: St) -> Job:
   match rest:
     case Con{T.Grp{40, l2, ks}, r}:
-      Post{0, "", r, st}
+      Post{0, NoStorage{}, r, st}
     case other:
-      Post{0, "", other, st}
+      Post{0, NoStorage{}, other, st}
 
 # `C::m(args)` or `C::x`.
 def j.static(rest: List<&2, T.Node>, +c: String, +t: U32, st: St) -> Job:
   match rest:
     case Con{T.Leaf{L.Tok{1, m, l3}}, Con{T.Grp{40, l4, args}, r}}:
-      Call{mk_call(2, m, c, l3, t, args, r), st}
+      Call{mk_call(StaticCall{}, m, c, l3, t, args, r), st}
     case Con{x, r}:
-      Post{0, "", r, st}
+      Post{0, NoStorage{}, r, st}
     case Nil{}:
-      Post{0, "", [], st}
+      Post{0, NoStorage{}, [], st}
 
 def j.idcall(rest: List<&2, T.Node>, +s: String, +l: U32, +st: St) -> Job:
   match rest:
     case Con{T.Grp{40, l2, args}, r}:
-      Call{mk_call(0, s, "", l, 0, args, r), st}
+      Call{mk_call(FunctionCall{}, s, "", l, 0, args, r), st}
     case Con{T.Leaf{L.Tok{5, +op, +l2}}, +r}:
-      L.sel(Job, String.eq(op, "::"), u => j.static(r, s, 0, st), u => Post{0, "", Con{T.Leaf{L.Tok{5, op, l2}}, r}, st})
+      L.sel(Job, String.eq(op, "::"), u => j.static(r, s, 0, st), u => Post{0, NoStorage{}, Con{T.Leaf{L.Tok{5, op, l2}}, r}, st})
     case other:
-      Post{0, "", other, st}
+      Post{0, NoStorage{}, other, st}
 
-def j.id(rest: List<&2, T.Node>, code: U32, +s: String, +l: U32, st: St) -> Job:
+def j.id(rest: List<&2, T.Node>, code: IdentifierKind, +s: String, +l: U32, st: St) -> Job:
   match code:
-    case 1:
+    case NewIdentifier{}:
       j.new(new_split(rest), st)
-    case 2:
+    case CloneIdentifier{}:
       Prim{rest, st}
-    case 3:
+    case MatchIdentifier{}:
       j.match(rest, st)
-    case 4:
+    case ArrayIdentifier{}:
       j.arr(rest, st)
-    case 5:
+    case IssetIdentifier{}:
       j.isset(rest, st)
     case _:
       j.idcall(rest, s, l, st)
@@ -1704,22 +1947,22 @@ def j.prim1(+rest: List<&2, T.Node>, code: U32, +s: String, +l: U32, +h: T.Node,
     case 1:
       j.id(rest, id_code(s), s, l, st)
     case 0:
-      Post{var_t(s, rest, st.env(st)), s, rest, st}
+      Post{var_t(s, rest, st.env(st)), storage.start(s), rest, st}
     case 3:
-      Post{istr(st.env(st), s), "", rest, st}
+      Post{istr(st.env(st), s), NoStorage{}, rest, st}
     case 7:
       +t = istr(st.env(st), s)
-      Post{t, "", rest, st.find(st, l, sink.bits(t, 2), "backtick")}
+      Post{t, NoStorage{}, rest, st.find(st, l, sink.bits(t, 2), "backtick")}
     case 40:
-      JThen{Ex{node_kids(h), st}, KPost{"", rest}}
+      JThen{Ex{node_kids(h), st}, KPost{NoStorage{}, rest}}
     case 91:
-      JThen{Parts{1, args_of(node_kids(h)), st, 0}, KPost{"", rest}}
+      JThen{Parts{UnionParts{0}, args_of(node_kids(h)), st}, KPost{NoStorage{}, rest}}
     case 123:
       Prim{rest, st}
     case 35:
       Prim{rest, st}
     case _:
-      Post{0, "", rest, st}
+      Post{0, NoStorage{}, rest, st}
 
 def j.prim(ns: List<&2, T.Node>, st: St) -> Job:
   match ns:
@@ -1728,46 +1971,46 @@ def j.prim(ns: List<&2, T.Node>, st: St) -> Job:
     case Con{+h, rest}:
       j.prim1(rest, node_code(h), leaf_text(h), node_line(h), h, st)
 
-def j.arrow2(r: List<&2, T.Node>, +m: String, +l2: U32, +t: U32, +path: String, +st: St) -> Job:
+def j.arrow2(r: List<&2, T.Node>, +m: String, +l2: U32, +t: U32, +path: StorageIdentity, +st: St) -> Job:
   match r:
     case Con{T.Grp{40, l3, args}, r2}:
-      Call{mk_call(1, m, path, l2, t, args, r2), st}
+      Call{mk_call(MethodCall{}, m, storage.key(path), l2, t, args, r2), st}
     case other:
       +k = pkey(path, m)
-      Post{env.get(st.env(st), k, t), k, other, st}
+      Post{env.get(st.env(st), storage.key(k), t), k, other, st}
 
-def j.arrow(rest: List<&2, T.Node>, +t: U32, +path: String, +st: St) -> Job:
+def j.arrow(rest: List<&2, T.Node>, +t: U32, +path: StorageIdentity, +st: St) -> Job:
   match rest:
     case Con{T.Leaf{L.Tok{1, m, l2}}, r}:
       j.arrow2(r, m, l2, t, path, st)
     case Con{x, r}:
-      Post{t, "", r, st}
+      Post{t, NoStorage{}, r, st}
     case Nil{}:
-      Post{t, "", [], st}
+      Post{t, NoStorage{}, [], st}
 
-def j.postop(+rest: List<&2, T.Node>, code: U32, +t: U32, +path: String, +st: St) -> Job:
+def j.postop(+rest: List<&2, T.Node>, code: PostfixKind, +t: U32, +path: StorageIdentity, +st: St) -> Job:
   match code:
-    case 1:
+    case PropertyPostfix{}:
       j.arrow(rest, t, path, st)
-    case 2:
+    case StaticPostfix{}:
       j.static(rest, "", t, st)
     case _:
       Post{t, path, rest, st}
 
-def j.post1(+rest: List<&2, T.Node>, code: U32, +s: String, +h: T.Node, +t: U32, +path: String, +st: St) -> Job:
+def j.post1(+rest: List<&2, T.Node>, code: U32, +s: String, +h: T.Node, +t: U32, +path: StorageIdentity, +st: St) -> Job:
   match code:
     case 91:
       JThen{Ex{node_kids(h), st}, KPostI{t, rest}}
     case 123:
       JThen{Ex{node_kids(h), st}, KPostI{t, rest}}
     case 40:
-      Call{mk_call(3, "", "", node_line(h), t, node_kids(h), rest), st}
+      Call{mk_call(DynamicCall{}, "", "", node_line(h), t, node_kids(h), rest), st}
     case 5:
       j.postop(rest, arrow_code(s), t, path, st)
     case _:
       Post{t, path, rest, st}
 
-def j.post(t: U32, path: String, ns: List<&2, T.Node>, st: St) -> Job:
+def j.post(t: U32, path: StorageIdentity, ns: List<&2, T.Node>, st: St) -> Job:
   match ns:
     case Nil{}:
       JDone{Res{t, [], st}}
@@ -1809,15 +2052,15 @@ def j.block(ns: List<&2, T.Node>, st: St) -> Job:
       JDone{Res{0, [], st}}
 
 # After `if`/`while`/`switch`/`for`/`foreach`/`catch`: `(header) body`.
-def j.hdr(ns: List<&2, T.Node>, +code: U32, st: St) -> Job:
+def j.hdr(ns: List<&2, T.Node>, +code: StatementKind, st: St) -> Job:
   match ns:
     case Con{T.Grp{40, l, hdr}, rest}:
       match code:
-        case 5:
+        case ConditionStatement{}:
           JThen{Ex{hdr, st}, KHdr{rest}}
-        case 6:
-          JThen{Parts{0, for_parts(split_all(hdr, ";")), st, 0}, KHdr{rest}}
-        case 7:
+        case ForStatement{}:
+          JThen{Parts{CleanParts{}, for_parts(split_all(hdr, ";")), st}, KHdr{rest}}
+        case ForeachStatement{}:
           j.fe(split_at(hdr, 1, "as"), rest, st)
         case _:
           Body{rest, st}
@@ -1833,54 +2076,54 @@ def j.default(ns: List<&2, T.Node>, st: St) -> Job:
     case other:
       Stmts{other, st}
 
-def j.stmts(code: U32, +ns: List<&2, T.Node>, st: St) -> Job:
+def j.stmts(code: StatementKind, +ns: List<&2, T.Node>, st: St) -> Job:
   match code:
-    case 0:
+    case EndStatements{}:
       JDone{Res{0, [], st}}
-    case 1:
+    case SkipStatementToken{}:
       Stmts{drop1(ns), st}
-    case 2:
+    case BlockStatement{}:
       j.block(ns, st)
-    case 3:
+    case EchoStatement{}:
       j.echo(split_at(drop1(ns), 5, ";"), first_line(ns), st)
-    case 4:
+    case ReturnStatement{}:
       j.ret(split_at(drop1(ns), 5, ";"), st)
-    case 5:
-      j.hdr(drop1(ns), 5, st)
-    case 6:
-      j.hdr(drop1(ns), 6, st)
-    case 7:
-      j.hdr(drop1(ns), 7, st)
-    case 15:
-      j.hdr(drop1(ns), 15, st)
-    case 8:
+    case ConditionStatement{}:
+      j.hdr(drop1(ns), ConditionStatement{}, st)
+    case ForStatement{}:
+      j.hdr(drop1(ns), ForStatement{}, st)
+    case ForeachStatement{}:
+      j.hdr(drop1(ns), ForeachStatement{}, st)
+    case OpaqueHeaderStatement{}:
+      j.hdr(drop1(ns), OpaqueHeaderStatement{}, st)
+    case BodyStatement{}:
       Body{drop1(ns), st}
-    case 9:
+    case CaseStatement{}:
       Stmts{two.b(split_at(drop1(ns), 5, ":")), st}
-    case 16:
+    case DefaultStatement{}:
       j.default(drop1(ns), st)
-    case 10:
+    case FunctionStatement{}:
       Stmts{skip_brace(drop1(ns)), st}
-    case 11:
+    case ClassStatement{}:
       Stmts{skip_brace(drop1(ns)), st}
-    case 12:
+    case NamespaceStatement{}:
       Stmts{ns_body(drop1(ns)), st}
-    case 13:
+    case SkipStatement{}:
       Stmts{two.b(split_at(drop1(ns), 5, ";")), st}
-    case 14:
+    case ExpressionStatement{}:
       j.exs(split_at(ns, 5, ";"), st)
     case _:
       Stmts{drop1(ns), st}
 
-def j.body(code: U32, +ns: List<&2, T.Node>, st: St) -> Job:
+def j.body(code: BodyKind, +ns: List<&2, T.Node>, st: St) -> Job:
   match code:
-    case 0:
+    case BracedBody{}:
       j.block(ns, st)
-    case 1:
+    case SkipBodyToken{}:
       Stmts{drop1(ns), st}
-    case 2:
+    case KeywordBody{}:
       Stmts{ns, st}
-    case 3:
+    case ExpressionBody{}:
       j.bodye(split_at(ns, 5, ";"), st)
     case _:
       JDone{Res{0, [], st}}
@@ -1895,10 +2138,10 @@ def step(j: Job, +cx: Map<&2, Sum>) -> Job:
       j.post(t, path, ns, st)
     case Call{+ci, st}:
       JThen{Args{args_of(ci_args(ci)), st, []}, KCall{ci}}
-    case Parts{mode, Nil{}, st, acc}:
-      JDone{Res{b2t(nz(mode), acc), [], st}}
-    case Parts{mode, Con{x, rest}, st, acc}:
-      JThen{Ex{x, st}, KParts{mode, rest, acc}}
+    case Parts{mode, Nil{}, st}:
+      JDone{Res{parts.result(mode), [], st}}
+    case Parts{mode, Con{x, rest}, st}:
+      JThen{Ex{x, st}, KParts{mode, rest}}
     case Args{Nil{}, st, +acc}:
       JDone{Res{or_list(acc), List.reverse(&2, U32, acc), st}}
     case Args{Con{x, rest}, st, acc}:
@@ -1907,10 +2150,10 @@ def step(j: Job, +cx: Map<&2, Sum>) -> Job:
       JDone{Res{0, [], st}}
     case PipeS{Con{x, rest}, line, st}:
       JThen{Ex{x, st}, KPipe{rest, line}}
-    case PipeC{"", part, t, st, line}:
+    case PipeC{UnknownPipe{}, part, t, st, line}:
       JThen{Ex{part, st}, KOr{t}}
-    case PipeC{name, part, t, st, line}:
-      JDone{call_apply(CallI{0, name, "", line, 0, 0, "", [], []}, [t], st, cx)}
+    case PipeC{NamedPipe{name}, part, t, st, line}:
+      JDone{call_apply(CallI{FunctionCall{}, name, "", line, 0, OrdinaryCall{}, [], []}, [t], st, cx)}
     case Stmts{+ns, st}:
       j.stmts(stmt_kind(ns), ns, st)
     case Block{ns, +st}:
@@ -1951,42 +2194,48 @@ def brace_split(ns: List<&2, T.Node>) -> Two:
     case Con{n, rest}:
       brace_split(rest)
 
-# A parameter type word: 1 numeric, 0 neutral, 2 anything else.
-def ptype(s: String) -> U32:
+def ptype(s: String) -> ParamType:
   match s:
     case "int":
-      1
+      NumericParam{}
     case "float":
-      1
+      NumericParam{}
     case "bool":
-      1
+      NumericParam{}
     case "true":
-      1
+      NumericParam{}
     case "false":
-      1
+      NumericParam{}
     case "null":
-      0
+      UntypedParam{}
     case "public":
-      0
+      UntypedParam{}
     case "private":
-      0
+      UntypedParam{}
     case "protected":
-      0
+      UntypedParam{}
     case "readonly":
-      0
+      UntypedParam{}
     case _:
-      2
+      OtherParam{}
 
-# state: 0 no type yet, 1 numeric types only, 2 another type.
-def ptype_st(+st: U32, +p: U32) -> U32:
-  L.sel(U32, U32.is_eq(p, 0), u => st, u => L.sel(U32, U32.is_eq(p, 2) || U32.is_eq(st, 2), v => 2, v => 1))
+def ptype_st(st: ParamType, p: ParamType) -> ParamType:
+  match st p:
+    case s UntypedParam{}:
+      s
+    case OtherParam{} p:
+      OtherParam{}
+    case s OtherParam{}:
+      OtherParam{}
+    case s NumericParam{}:
+      NumericParam{}
 
-def param.go(ns: List<&2, T.Node>, +st: U32) -> Param:
+def param.go(ns: List<&2, T.Node>, +st: ParamType) -> Param:
   match ns:
     case Nil{}:
-      Param{"", False{}}
+      Param{"", UntypedParam{}}
     case Con{T.Leaf{L.Tok{0, v, l}}, r}:
-      Param{v, U32.is_eq(st, 1)}
+      Param{v, st}
     case Con{T.Leaf{L.Tok{1, s, l}}, r}:
       param.go(r, ptype_st(st, ptype(s)))
     case Con{n, r}:
@@ -1997,31 +2246,36 @@ def params.go(xs: List<&2, List<&2, T.Node>>) -> List<&2, Param>:
     case Nil{}:
       []
     case Con{x, rest}:
-      Con{param.go(x, 0), params.go(rest)}
+      Con{param.go(x, UntypedParam{}), params.go(rest)}
 
 def params(ps: List<&2, T.Node>) -> List<&2, Param>:
   params.go(split_all(ps, ","))
 
 type DW is Data:
-  DW{ns: List<&2, T.Node>, inclass: Bool}
+  DW{ns: List<&2, T.Node>, context: DeclarationContext}
 
 type DS is Data:
   DS{work: List<&2, DW>, acc: List<&2, Decl>}
 
-def decl_code(s: String) -> U32:
+type DeclarationKind is Data:
+  OtherDeclaration{}
+  FunctionDeclaration{}
+  ClassDeclaration{}
+
+def decl_code(s: String) -> DeclarationKind:
   match s:
     case "function":
-      1
+      FunctionDeclaration{}
     case "class":
-      2
+      ClassDeclaration{}
     case "interface":
-      2
+      ClassDeclaration{}
     case "trait":
-      2
+      ClassDeclaration{}
     case "enum":
-      2
+      ClassDeclaration{}
     case _:
-      0
+      OtherDeclaration{}
 
 def drop_amp(ns: List<&2, T.Node>) -> List<&2, T.Node>:
   match ns:
@@ -2030,53 +2284,53 @@ def drop_amp(ns: List<&2, T.Node>) -> List<&2, T.Node>:
     case other:
       other
 
-def dkey(ic: Bool, +name: String) -> String:
+def dkey(ic: DeclarationContext, +name: String) -> String:
   match ic:
-    case True{}:
+    case InsideClass{}:
       "->" ++ String.to_lower(name)
-    case False{}:
+    case OutsideClass{}:
       String.to_lower(name)
 
-def dstep.fn2(two: Two, +key: String, ps: List<&2, Param>, +ic: Bool, work: List<&2, DW>, acc: List<&2, Decl>) -> DS:
+def dstep.fn2(two: Two, +key: String, ps: List<&2, Param>, +ic: DeclarationContext, work: List<&2, DW>, acc: List<&2, Decl>) -> DS:
   match two:
     case Two{+body, after}:
-      DS{Con{DW{body, False{}}, Con{DW{after, ic}, work}}, Con{Decl{key, ps, body}, acc}}
+      DS{Con{DW{body, OutsideClass{}}, Con{DW{after, ic}, work}}, Con{Decl{key, ps, body}, acc}}
 
-def dstep.fn(rest: List<&2, T.Node>, +ic: Bool, work: List<&2, DW>, acc: List<&2, Decl>) -> DS:
+def dstep.fn(rest: List<&2, T.Node>, +ic: DeclarationContext, work: List<&2, DW>, acc: List<&2, Decl>) -> DS:
   match rest:
     case Con{T.Leaf{L.Tok{1, name, l}}, Con{T.Grp{40, l2, ps}, r}}:
       dstep.fn2(brace_split(r), dkey(ic, name), params(ps), ic, work, acc)
     case other:
       DS{Con{DW{other, ic}, work}, acc}
 
-def dstep.cls(two: Two, +ic: Bool, work: List<&2, DW>, acc: List<&2, Decl>) -> DS:
+def dstep.cls(two: Two, +ic: DeclarationContext, work: List<&2, DW>, acc: List<&2, Decl>) -> DS:
   match two:
     case Two{body, after}:
-      DS{Con{DW{body, True{}}, Con{DW{after, ic}, work}}, acc}
+      DS{Con{DW{body, InsideClass{}}, Con{DW{after, ic}, work}}, acc}
 
-def dstep.id(code: U32, rest: List<&2, T.Node>, +ic: Bool, work: List<&2, DW>, acc: List<&2, Decl>) -> DS:
+def dstep.id(code: DeclarationKind, rest: List<&2, T.Node>, +ic: DeclarationContext, work: List<&2, DW>, acc: List<&2, Decl>) -> DS:
   match code:
-    case 1:
+    case FunctionDeclaration{}:
       dstep.fn(drop_amp(rest), ic, work, acc)
-    case 2:
+    case ClassDeclaration{}:
       dstep.cls(brace_split(rest), ic, work, acc)
     case _:
       DS{Con{DW{rest, ic}, work}, acc}
 
-def dstep.h(code: U32, +s: String, +h: T.Node, +rest: List<&2, T.Node>, +ic: Bool, work: List<&2, DW>, acc: List<&2, Decl>) -> DS:
+def dstep.h(code: U32, +s: String, +h: T.Node, +rest: List<&2, T.Node>, +ic: DeclarationContext, work: List<&2, DW>, acc: List<&2, Decl>) -> DS:
   match code:
     case 1:
       dstep.id(decl_code(s), rest, ic, work, acc)
     case 123:
       DS{Con{DW{node_kids(h), ic}, Con{DW{rest, ic}, work}}, acc}
     case 40:
-      DS{Con{DW{node_kids(h), False{}}, Con{DW{rest, ic}, work}}, acc}
+      DS{Con{DW{node_kids(h), OutsideClass{}}, Con{DW{rest, ic}, work}}, acc}
     case 91:
-      DS{Con{DW{node_kids(h), False{}}, Con{DW{rest, ic}, work}}, acc}
+      DS{Con{DW{node_kids(h), OutsideClass{}}, Con{DW{rest, ic}, work}}, acc}
     case _:
       DS{Con{DW{rest, ic}, work}, acc}
 
-def dstep.w(ns: List<&2, T.Node>, ic: Bool, work: List<&2, DW>, acc: List<&2, Decl>) -> DS:
+def dstep.w(ns: List<&2, T.Node>, ic: DeclarationContext, work: List<&2, DW>, acc: List<&2, Decl>) -> DS:
   match ns:
     case Nil{}:
       DS{work, acc}
@@ -2101,21 +2355,38 @@ def decls(fuel: Nat, ds: DS) -> List<&2, Decl>:
       decls(p, dstep(d))
 
 # ---------------------------------------------------------------- summaries
+def seed.selected(target: SeedTarget, i: U32) -> Bool:
+  match target:
+    case BaselineParameter65535{}:
+      U32.is_eq(i, 65535)
+    case SeedParameter{index}:
+      U32.is_eq(i, index)
 
-def bind(ps: List<&2, Param>, +idx: U32, +i: U32, +env: Map<&2, U32>, seed: Seed) -> Map<&2, U32>:
-  match ps seed:
-    case Nil{} s:
+def seed.taint(seed: Seed) -> U32:
+  match seed:
+    case SrcSeed{}:
+      SRC()
+    case MarkerSeed{}:
+      marker.add(SRC(), ParameterOrigin{})
+
+def param.seed(kind: ParamType, +selected: Bool, +seed: Seed) -> U32:
+  match kind:
+    case NumericParam{}:
+      0
+    case _:
+      b2t(selected, seed.taint(seed))
+
+def bind(ps: List<&2, Param>, +target: SeedTarget, +i: U32, +env: Map<&2, U32>, +seed: Seed) -> Map<&2, U32>:
+  match ps:
+    case Nil{}:
       env
-    case Con{Param{name, num}, rest} SrcSeed{}:
-      bind(rest, idx, U32.add(i, 1), env.set(env, name, b2t(U32.is_eq(i, idx) && Bool.not(num), SRC())), SrcSeed{})
-    case Con{Param{name, num}, rest} MarkerSeed{}:
-      bind(rest, idx, U32.add(i, 1), env.set(env, name, b2t(U32.is_eq(i, idx) && Bool.not(num), U32.or(SRC(), SUMMARY_MARKER()))), MarkerSeed{})
+    case Con{Param{name, kind}, rest}:
+      bind(rest, target, U32.add(i, 1), env.set(env, name, param.seed(kind, seed.selected(target, i), seed)), seed)
 
-# Analyze a declaration's body with parameter idx bound to request input or a summary marker.
-def run(fuel: Nat, d: Decl, +idx: U32, +cx: Map<&2, Sum>, seed: Seed) -> Res:
+def run(fuel: Nat, d: Decl, +target: SeedTarget, +cx: Map<&2, Sum>, seed: Seed) -> Res:
   match d:
     case Decl{key, ps, body}:
-      an(fuel, Stmts{body, St{bind(ps, idx, 0, MTip{}, seed), [], 0, 0}}, cx)
+      an(fuel, Stmts{body, St{bind(ps, target, 0, MTip{}, seed), [], 0, 0}}, cx)
 
 def res_st(r: Res) -> St:
   match r:
@@ -2135,17 +2406,17 @@ def fs.new(fs: List<&2, Finding>, +base: List<&2, Finding>) -> U32:
     case Nil{}:
       0
     case Con{Finding{+l, +c, s}, rest}:
-      tor(b2t(Bool.not(fs.has(base, l, c)), c), fs.new(rest, base))
+      taint.join(b2t(Bool.not(fs.has(base, l, c)), c), fs.new(rest, base))
 
 type PS is Data:
   PS{prop: U32, sink: U32, revived: U32}
 
 def sum.one(fuel: Nat, +d: Decl, +i: U32, +cx: Map<&2, Sum>, +base: List<&2, Finding>, p: Param) -> PS:
   match p:
-    case Param{name, True{}}:
+    case Param{name, NumericParam{}}:
       PS{0, 0, 0}
-    case Param{name, False{}}:
-      +st = res_st(run(fuel, d, i, cx, MarkerSeed{}))
+    case Param{name, kind}:
+      +st = res_st(run(fuel, d, SeedParameter{i}, cx, MarkerSeed{}))
       PS{U32.and(st_ret(st), SRC()), fs.new(st.fs(st), base), st.revived(st)}
 
 def sum.params(ps: List<&2, Param>, +fuel: Nat, +d: Decl, +i: U32, +cx: Map<&2, Sum>, +base: List<&2, Finding>) -> List<&2, PS>:
@@ -2191,7 +2462,7 @@ def decl_key(d: Decl) -> String:
       key
 
 def sum.decl(+fuel: Nat, +d: Decl, +cx: Map<&2, Sum>) -> KS:
-  +st = res_st(run(fuel, d, 65535, cx, SrcSeed{}))
+  +st = res_st(run(fuel, d, BaselineParameter65535{}, cx, SrcSeed{}))
   +xs = sum.params(decl_ps(d), fuel, d, 0, cx, st.fs(st))
   KS{decl_key(d), Sum{st_ret(st), ps.props(xs), ps.sinks(xs), ps.revived(xs)}}
 
@@ -2210,7 +2481,7 @@ def zip_or_list(a: List<&2, U32>, b: List<&2, U32>) -> List<&2, U32>:
     case Con{x, xr} Nil{}:
       Con{x, xr}
     case Con{x, xr} Con{y, yr}:
-      Con{tor(x, y), zip_or_list(xr, yr)}
+      Con{taint.join(x, y), zip_or_list(xr, yr)}
 
 # Same-named methods in different classes share one key: OR them.
 def sum.merge(a: Sum, b: Sum) -> Sum:
@@ -2220,7 +2491,7 @@ def sum.merge(a: Sum, b: Sum) -> Sum:
     case Sum{s, p, k, r} NoSum{}:
       Sum{s, p, k, r}
     case Sum{s, p, k, r} Sum{s2, p2, k2, r2}:
-      Sum{tor(s, s2), zip_or_list(p, p2), zip_or_list(k, k2), zip_or_list(r, r2)}
+      Sum{taint.join(s, s2), zip_or_list(p, p2), zip_or_list(k, k2), zip_or_list(r, r2)}
 
 def sum.put(kss: List<&2, KS>, +m: Map<&2, Sum>) -> Map<&2, Sum>:
   match kss:
@@ -2232,17 +2503,35 @@ def sum.put(kss: List<&2, KS>, +m: Map<&2, Sum>) -> Map<&2, Sum>:
 def round(+ds: List<&2, Decl>, +fuel: Nat, +cx: Map<&2, Sum>) -> Map<&2, Sum>:
   sum.put(sum.decls(ds, fuel, cx), MTip{})
 
+def summary.step(build: SummaryBuild, +ds: List<&2, Decl>, +fuel: Nat) -> SummaryBuild:
+  match build:
+    case SummaryBuild{FirstSummary{}, cx}:
+      SummaryBuild{SecondSummary{}, round(ds, fuel, cx)}
+    case SummaryBuild{SecondSummary{}, cx}:
+      SummaryBuild{ThirdSummary{}, round(ds, fuel, cx)}
+    case SummaryBuild{ThirdSummary{}, cx}:
+      SummaryBuild{SummariesReady{}, round(ds, fuel, cx)}
+    case SummaryBuild{SummariesReady{}, cx}:
+      SummaryBuild{SummariesReady{}, cx}
+
+def summary.result(build: SummaryBuild) -> Map<&2, Sum>:
+  match build:
+    case SummaryBuild{phase, cx}:
+      cx
+
+def summaries(+ds: List<&2, Decl>, +fuel: Nat) -> Map<&2, Sum>:
+  summary.result(summary.step(summary.step(summary.step(SummaryBuild{FirstSummary{}, MTip{}}, ds, fuel), ds, fuel), ds, fuel))
+
 # Baseline findings of every declaration body.
 def decl_fs(ds: List<&2, Decl>, +fuel: Nat, +cx: Map<&2, Sum>) -> List<&2, Finding>:
   match ds:
     case Nil{}:
       []
     case Con{d, rest}:
-      a b = st.fs(res_st(run(fuel, d, 65535, cx, SrcSeed{}))) decl_fs(rest, fuel, cx)
+      a b = st.fs(res_st(run(fuel, d, BaselineParameter65535{}, cx, SrcSeed{}))) decl_fs(rest, fuel, cx)
       List.concat(&2, Finding, [a, b])
 
 # ---------------------------------------------------------------- entry
-
 def u32.has(xs: List<&2, U32>, +x: U32) -> Bool:
   match xs:
     case Nil{}:
@@ -2288,7 +2577,7 @@ def scan(src: String) -> List<&2, Finding>:
   +ts = L.lex(src)
   +ns = T.tree(L.without_ignores(ts))
   +fuel = Nat.add(Nat.mul(List.length(&2, L.Tok, ts), 16n), 4096n)
-  +ds = decls(fuel, DS{[DW{ns, False{}}], []})
-  +cx = round(ds, fuel, round(ds, fuel, round(ds, fuel, MTip{})))
+  +ds = decls(fuel, DS{[DW{ns, OutsideClass{}}], []})
+  +cx = summaries(ds, fuel)
   top fs2 = st.fs(res_st(an(fuel, Stmts{ns, St{MTip{}, [], 0, 0}}, cx))) decl_fs(ds, fuel, cx)
-  f.sort(suppress(List.concat(&2, Finding, [top, fs2]), L.ignored_lines(ts, 0)), [])
+  f.sort(suppress(List.concat(&2, Finding, [top, fs2]), L.ignored_lines(ts)), [])

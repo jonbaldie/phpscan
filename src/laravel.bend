@@ -25,6 +25,14 @@ type LinkedGuardRoute is Data:
 type Alias is Data:
   Alias{name: String, target: String}
 
+type StatementState is Data:
+  StatementBoundary{}
+  StatementBody{last: T.Node, reversed: List<&2, T.Node>}
+
+type RouteState is Data:
+  ReadingRoutes{imports: List<&2, Alias>, reversed: List<&2, Route>}
+  InvalidRoutes{}
+
 def has_key(fs: List<&2, Field>, +key: String) -> Bool:
   match fs:
     case Nil{}:
@@ -99,9 +107,9 @@ def returned(ns: List<&2, T.Node>) -> Maybe<&2, List<&2, Field>>:
 
 def parse_config(+path: String, +tokens: List<&2, L.Tok>) -> Maybe<&2, Config>:
   do Maybe<&2, Config>:
-    fs : List<&2, Field> <- L.sel(Maybe<&2, List<&2, Field>>, T.balanced(tokens, []),
+    fs : List<&2, Field> <- L.sel(Maybe<&2, List<&2, Field>>, T.balanced(tokens),
       u => returned(T.tree(L.without_ignores(tokens))), u => None{})
-    return Config{path, fs, L.ignored_lines(tokens, 0)}
+    return Config{path, fs, L.ignored_lines(tokens)}
 
 def config(xs: List<&2, E.Src>, +path: String) -> Maybe<&2, Config>:
   match xs:
@@ -174,16 +182,20 @@ def unsupported_context(ns: List<&2, T.Node>) -> Bool:
     case Con{n, rest}:
       unsupported_context(rest)
 
-def statements(ns: List<&2, T.Node>, current: List<&2, T.Node>, acc: List<&2, List<&2, T.Node>>) -> Maybe<&2, List<&2, List<&2, T.Node>>>:
-  match ns current:
-    case Nil{} Nil{}:
+def statements(ns: List<&2, T.Node>, state: StatementState, acc: List<&2, List<&2, T.Node>>) -> Maybe<&2, List<&2, List<&2, T.Node>>>:
+  match ns state:
+    case Nil{} StatementBoundary{}:
       Some{List.reverse(&2, List<&2, T.Node>, acc)}
-    case Nil{} _:
+    case Nil{} StatementBody{last, cur}:
       None{}
-    case Con{T.Leaf{L.Tok{5, ";", l}}, rest} cur:
-      statements(rest, [], Con{List.reverse(&2, T.Node, cur), acc})
-    case Con{n, rest} cur:
-      statements(rest, Con{n, cur}, acc)
+    case Con{T.Leaf{L.Tok{5, ";", l}}, rest} StatementBoundary{}:
+      statements(rest, StatementBoundary{}, Con{[], acc})
+    case Con{T.Leaf{L.Tok{5, ";", l}}, rest} StatementBody{last, cur}:
+      statements(rest, StatementBoundary{}, Con{List.reverse(&2, T.Node, Con{last, cur}), acc})
+    case Con{n, rest} StatementBoundary{}:
+      statements(rest, StatementBody{n, []}, acc)
+    case Con{n, rest} StatementBody{last, cur}:
+      statements(rest, StatementBody{n, Con{last, cur}}, acc)
 
 def has_alias(xs: List<&2, Alias>, +name: String) -> Bool:
   match xs:
@@ -242,33 +254,33 @@ def route(ns: List<&2, T.Node>, im: List<&2, Alias>, path: String, ignores: List
     case _:
       []
 
-def route_statements(ss: List<&2, List<&2, T.Node>>, +im: List<&2, Alias>, +path: String, +ignores: List<&2, U32>) -> Maybe<&2, List<&2, Route>>:
-  match ss:
-    case Nil{}:
-      Some{[]}
-    case Con{Con{T.Leaf{L.Tok{1, "use", u}}, Con{T.Leaf{L.Tok{1, +target, t}}, Nil{}}}, rest}:
+def route_statements(ss: List<&2, List<&2, T.Node>>, state: RouteState, +path: String, +ignores: List<&2, U32>) -> Maybe<&2, List<&2, Route>>:
+  match ss state:
+    case _ InvalidRoutes{}:
+      None{}
+    case Nil{} ReadingRoutes{im, rs}:
+      Some{List.reverse(&2, Route, rs)}
+    case Con{Con{T.Leaf{L.Tok{1, "use", u}}, Con{T.Leaf{L.Tok{1, +target, t}}, Nil{}}}, rest} ReadingRoutes{+im, +rs}:
       +name = L.strip_ns(target)
-      L.sel(Maybe<&2, List<&2, Route>>, has_alias(im, name), v => None{},
-        v => route_statements(rest, Con{Alias{name, target}, im}, path, ignores))
-    case Con{Con{T.Leaf{L.Tok{1, "use", u}}, Con{T.Leaf{L.Tok{1, target, t}}, Con{T.Leaf{L.Tok{1, "as", a}}, Con{T.Leaf{L.Tok{1, +name, n}}, Nil{}}}}}, rest}:
-      L.sel(Maybe<&2, List<&2, Route>>, has_alias(im, name), v => None{},
-        v => route_statements(rest, Con{Alias{name, target}, im}, path, ignores))
-    case Con{Con{T.Leaf{L.Tok{1, "use", l}}, ns}, rest}:
+      route_statements(rest, L.sel(RouteState, has_alias(im, name), v => InvalidRoutes{},
+        v => ReadingRoutes{Con{Alias{name, target}, im}, rs}), path, ignores)
+    case Con{Con{T.Leaf{L.Tok{1, "use", u}}, Con{T.Leaf{L.Tok{1, target, t}}, Con{T.Leaf{L.Tok{1, "as", a}}, Con{T.Leaf{L.Tok{1, +name, n}}, Nil{}}}}}, rest} ReadingRoutes{+im, rs}:
+      route_statements(rest, L.sel(RouteState, has_alias(im, name), v => InvalidRoutes{},
+        v => ReadingRoutes{Con{Alias{name, target}, im}, rs}), path, ignores)
+    case Con{Con{T.Leaf{L.Tok{1, "use", l}}, ns}, rest} _:
       None{}
-    case Con{Con{T.Leaf{L.Tok{1, "namespace", l}}, ns}, rest}:
+    case Con{Con{T.Leaf{L.Tok{1, "namespace", l}}, ns}, rest} _:
       None{}
-    case Con{ns, rest}:
-      do Maybe<&2, List<&2, Route>>:
-        rs : List<&2, Route> <- route_statements(rest, im, path, ignores)
-        return List.append(&2, Route, route(ns, im, path, ignores), rs)
+    case Con{ns, rest} ReadingRoutes{+im, rs}:
+      route_statements(rest, ReadingRoutes{im, List.append(&2, Route, route(ns, im, path, ignores), rs)}, path, ignores)
 
 def route_file(path: String, +ts: List<&2, L.Tok>) -> List<&2, Route>:
   parsed = do Maybe<&2, List<&2, Route>>:
-    +ns : List<&2, T.Node> <- L.sel(Maybe<&2, List<&2, T.Node>>, T.balanced(ts, []),
+    +ns : List<&2, T.Node> <- L.sel(Maybe<&2, List<&2, T.Node>>, T.balanced(ts),
       u => Some{T.tree(L.without_ignores(ts))}, u => None{})
     ss : List<&2, List<&2, T.Node>> <- L.sel(Maybe<&2, List<&2, List<&2, T.Node>>>, unsupported_context(ns),
-      u => None{}, u => statements(ns, [], []))
-    rs : List<&2, Route> <- route_statements(ss, [], path, L.ignored_lines(ts, 0))
+      u => None{}, u => statements(ns, StatementBoundary{}, []))
+    rs : List<&2, Route> <- route_statements(ss, ReadingRoutes{[], []}, path, L.ignored_lines(ts))
     return rs
   Maybe.default(&2, List<&2, Route>, parsed, [])
 
@@ -344,5 +356,5 @@ def database(c: Maybe<&2, Config>) -> List<&2, E.Site>:
 
 def analyze(+root: String, +sources: List<&2, E.Src>) -> E.Evidence:
   +sites = guard_sites(guards(config(sources, join(root, "config/auth.php"))), route_sources(sources, join(root, "routes/")))
-  E.Evidence{L.sel(List<&2, E.Site>, List.is_empty(&2, E.Site, sites), u => [],
-    u => List.append(&2, E.Site, sites, database(config(sources, join(root, "config/database.php"))))), False{}}
+  E.Complete{L.sel(List<&2, E.Site>, List.is_empty(&2, E.Site, sites), u => [],
+    u => List.append(&2, E.Site, sites, database(config(sources, join(root, "config/database.php")))))}

@@ -27,9 +27,9 @@ def rows(sites: List<&2, E.Site>) -> String:
 
 def snapshot(result: E.Evidence) -> String:
   match result:
-    case E.Evidence{sites, False{}}:
+    case E.Complete{sites}:
       rows(sites)
-    case E.Evidence{sites, True{}}:
+    case E.Incomplete{sites}:
       "incomplete\n"
 
 def scan(r: String, e: String) -> String:
@@ -99,7 +99,7 @@ def collisions() -> Bool:
 
 def details(e: E.Evidence) -> Bool:
   match e:
-    case E.Evidence{Con{E.Observation{"app.php", 5, E.JsonApiResource{}, E.Possible{}, resource}, Con{E.Observation{"app.php", 9, E.JsonApiRelationships{}, E.Possible{}, relationships}, Con{E.Observation{"route.php", 5, E.JsonApiEndpoint{}, E.Possible{}, endpoint}, Nil{}}}}, False{}}:
+    case E.Complete{Con{E.Observation{"app.php", 5, E.JsonApiResource{}, E.Possible{}, resource}, Con{E.Observation{"app.php", 9, E.JsonApiRelationships{}, E.Possible{}, relationships}, Con{E.Observation{"route.php", 5, E.JsonApiEndpoint{}, E.Possible{}, endpoint}, Nil{}}}}}:
       String.eq(resource, "direct JsonApiResource subclass app\\http\\resources\\userresource; literal declared relationships: [comments]; model resolution unknown; runtime registration unknown; exploitability unknown") &&
         String.eq(relationships, "literal declared relationships: [comments]; model resolution unknown") &&
         String.eq(endpoint, "literal GET /users/{user} returns app\\http\\resources\\userresource; model resolution unknown; runtime registration unknown; exploitability unknown")
@@ -124,18 +124,16 @@ def enriched(fs: List<&2, A.Finding>) -> String:
 def integration(+e: E.Evidence, +sites: List<&2, E.Site>) -> Bool:
   +matches = A.scan("{\"packages\":[{\"name\":\"laravel/framework\",\"version\":\"12.67.0\"}]}")
   filtered(sites) &&
-    String.eq(enriched(A.enrich(matches, E.Evidence{sites, False{}})), "GHSA-5wcm-3v2w-8362\napp.php:5|jsonapi-resource|possible\napp.php:9|jsonapi-relationships|possible|literal declared relationships: [comments]; model resolution unknown\nroute.php:5|jsonapi-endpoint|possible\nGHSA-f9x3-7vq9-cph6\nauth.php:2|token-guard|possible\nroute.php:3|guard-route|possible\ndb.php:4|database-selection|unknown\n") &&
-    String.eq(enriched(A.enrich(matches, E.Evidence{sites, True{}})), "GHSA-5wcm-3v2w-8362\nsource evidence analysis exhausted its budget\nGHSA-f9x3-7vq9-cph6\nsource evidence analysis exhausted its budget\n") &&
+    String.eq(enriched(A.enrich(matches, E.Complete{sites})), "GHSA-5wcm-3v2w-8362\napp.php:5|jsonapi-resource|possible\napp.php:9|jsonapi-relationships|possible|literal declared relationships: [comments]; model resolution unknown\nroute.php:5|jsonapi-endpoint|possible\nGHSA-f9x3-7vq9-cph6\nauth.php:2|token-guard|possible\nroute.php:3|guard-route|possible\ndb.php:4|database-selection|unknown\n") &&
+    String.eq(enriched(A.enrich(matches, E.Incomplete{sites})), "GHSA-5wcm-3v2w-8362\nsource evidence analysis exhausted its budget\nGHSA-f9x3-7vq9-cph6\nsource evidence analysis exhausted its budget\n") &&
     A.needs_source(matches) && A.needs_profile(matches, "laravel-jsonapi") && A.needs_profile(matches, "laravel-token-guard") &&
     Bool.not(A.needs_profile(matches, "symfony-path-prefix")) &&
     E.possible([E.Observation{"resource.php", 5, E.JsonApiResource{}, E.Possible{}, "resource"}]) &&
     Bool.not(E.possible([E.Observation{"resource.php", 9, E.JsonApiRelationships{}, E.Unknown{}, "dynamic"}])) &&
     details(e)
 
-def combined(e: E.Evidence) -> Bool:
-  match e:
-    case E.Evidence{+sites, inc}:
-      integration(E.Evidence{sites, inc}, List.append(&2, E.Site, sites, [E.Observation{"auth.php", 2, E.TokenGuard{}, E.Possible{}, "guard"}, E.Observation{"route.php", 3, E.GuardRoute{}, E.Possible{}, "route"}, E.Observation{"db.php", 4, E.DatabaseSelection{}, E.Unknown{}, "database"}, E.Site{"symfony.php", 2, 3, 4, "request", "/admin"}]))
+def combined(+e: E.Evidence) -> Bool:
+  integration(e, List.append(&2, E.Site, E.sites(e), [E.Observation{"auth.php", 2, E.TokenGuard{}, E.Possible{}, "guard"}, E.Observation{"route.php", 3, E.GuardRoute{}, E.Possible{}, "route"}, E.Observation{"db.php", 4, E.DatabaseSelection{}, E.Unknown{}, "database"}, E.Site{"symfony.php", 2, 3, 4, "request", "/admin"}]))
 
 def main() -> U32:
   L.sel(U32, supported(),

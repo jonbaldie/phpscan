@@ -6,6 +6,9 @@ import ./evidence.bend as E
 type Relationships is Data:
   Literal{line: U32, names: List<&2, String>}
   Unknown{line: U32, reason: String}
+  Unavailable{}
+  DuplicateRelationships{}
+  SuppressedRelationships{}
 
 type Resource is Data:
   Resource{identity: String, path: String, line: U32, relationships: Relationships}
@@ -14,7 +17,7 @@ type Endpoint is Data:
   Endpoint{path: String, line: U32, route: String, resource: Resource}
 
 type ScanResult is Data:
-  ScanResult{resources: List<&2, Resource>, endpoints: List<&2, Endpoint>, incomplete: Bool}
+  ScanResult{resources: List<&2, Resource>, endpoints: List<&2, Endpoint>, completion: E.Completion}
 
 type Import is Data:
   Import{alias: String, target: String}
@@ -25,14 +28,32 @@ type Scope is Data:
 
 type ClassState is Data:
   Other{}
-  ResourceClass{resource: Resource, visible: Bool}
+  ResourceClass{resource: Resource}
+  SuppressedResource{resource: Resource}
   Ambiguous{}
 
 type Entry is Data:
   Entry{identity: String, state: ClassState}
 
 type Index is Data:
-  Index{entries: List<&2, Entry>, uncertain: Bool, incomplete: Bool}
+  Index{entries: List<&2, Entry>, certainty: Certainty, completion: E.Completion}
+
+type Certainty is Data:
+  Certain{}
+  Uncertain{}
+
+type NameState is Data:
+  NameStart{}
+  NameTail{}
+
+type ScopePhase is Data:
+  LeadingImports{namespace: String, imports: List<&2, Import>}
+  FileBody{namespace: String, imports: List<&2, Import>}
+
+type RelationshipState is Data:
+  NoRelationships{}
+  OneRelationship{value: Relationships}
+  ManyRelationships{}
 
 def ignored(xs: List<&2, U32>, +line: U32) -> Bool:
   match xs:
@@ -41,27 +62,27 @@ def ignored(xs: List<&2, U32>, +line: U32) -> Bool:
     case Con{x, rest}:
       U32.is_eq(x, line) || ignored(rest, line)
 
-def simple_name(s: String, start: Bool) -> Bool:
+def simple_name(s: String, start: NameState) -> Bool:
   match s start:
-    case SNil{} False{}:
+    case SNil{} NameTail{}:
       True{}
-    case SCon{c, rest} True{}:
-      L.is_name_start(c) && simple_name(rest, False{})
-    case SCon{c, rest} False{}:
-      L.is_name_char(c) && simple_name(rest, False{})
+    case SCon{c, rest} NameStart{}:
+      L.is_name_start(c) && simple_name(rest, NameTail{})
+    case SCon{c, rest} NameTail{}:
+      L.is_name_char(c) && simple_name(rest, NameTail{})
     case _ _:
       False{}
 
-def qualified_name(s: String, start: Bool) -> Bool:
+def qualified_name(s: String, start: NameState) -> Bool:
   match s start:
-    case SNil{} False{}:
+    case SNil{} NameTail{}:
       True{}
-    case SCon{'\\', rest} False{}:
-      qualified_name(rest, True{})
-    case SCon{c, rest} True{}:
-      L.is_name_start(c) && qualified_name(rest, False{})
-    case SCon{c, rest} False{}:
-      L.is_name_char(c) && qualified_name(rest, False{})
+    case SCon{'\\', rest} NameTail{}:
+      qualified_name(rest, NameStart{})
+    case SCon{c, rest} NameStart{}:
+      L.is_name_start(c) && qualified_name(rest, NameTail{})
+    case SCon{c, rest} NameTail{}:
+      L.is_name_char(c) && qualified_name(rest, NameTail{})
     case _ _:
       False{}
 
@@ -80,37 +101,43 @@ def has_alias(xs: List<&2, Import>, +alias: String) -> Bool:
       String.eq(name, alias) || has_alias(rest, alias)
 
 def valid_import(name: String, +alias: String, im: List<&2, Import>) -> Bool:
-  qualified_name(absolute(name), True{}) && simple_name(alias, True{}) && Bool.not(has_alias(im, alias))
+  qualified_name(absolute(name), NameStart{}) && simple_name(alias, NameStart{}) && Bool.not(has_alias(im, alias))
 
 def unsupported_keyword(+name: String) -> Bool:
   String.eq(name, "endif") || String.eq(name, "endwhile") || String.eq(name, "endfor") ||
     String.eq(name, "endforeach") || String.eq(name, "endswitch") || String.eq(name, "enddeclare") ||
     String.eq(name, "__halt_compiler") || String.eq(name, "declare")
 
-def scope(ns: List<&2, T.Node>, namespace: String, +im: List<&2, Import>, leading: Bool) -> Scope:
-  match ns leading:
-    case Nil{} _:
+def scope(ns: List<&2, T.Node>, phase: ScopePhase) -> Scope:
+  match ns phase:
+    case Nil{} LeadingImports{namespace, im}:
+      Scope{namespace, im}
+    case Nil{} FileBody{namespace, im}:
       Scope{namespace, im}
     case Con{T.Leaf{L.Tok{1, "namespace", l}}, rest} _:
       Invalid{}
-    case Con{T.Leaf{L.Tok{1, "use", l}}, Con{T.Leaf{L.Tok{1, +name, n}}, Con{T.Leaf{L.Tok{5, ";", e}}, rest}}} True{}:
+    case Con{T.Leaf{L.Tok{1, "use", l}}, Con{T.Leaf{L.Tok{1, +name, n}}, Con{T.Leaf{L.Tok{5, ";", e}}, rest}}} LeadingImports{namespace, +im}:
       +alias = L.strip_ns(name)
-      L.sel(Scope, valid_import(name, alias, im), u => scope(rest, namespace, Con{Import{alias, absolute(name)}, im}, True{}), u => Invalid{})
-    case Con{T.Leaf{L.Tok{1, "use", l}}, Con{T.Leaf{L.Tok{1, +name, n}}, Con{T.Leaf{L.Tok{1, "as", a}}, Con{T.Leaf{L.Tok{1, +alias, b}}, Con{T.Leaf{L.Tok{5, ";", e}}, rest}}}}} True{}:
-      L.sel(Scope, valid_import(name, alias, im), u => scope(rest, namespace, Con{Import{alias, absolute(name)}, im}, True{}), u => Invalid{})
+      L.sel(Scope, valid_import(name, alias, im), u => scope(rest, LeadingImports{namespace, Con{Import{alias, absolute(name)}, im}}), u => Invalid{})
+    case Con{T.Leaf{L.Tok{1, "use", l}}, Con{T.Leaf{L.Tok{1, +name, n}}, Con{T.Leaf{L.Tok{1, "as", a}}, Con{T.Leaf{L.Tok{1, +alias, b}}, Con{T.Leaf{L.Tok{5, ";", e}}, rest}}}}} LeadingImports{namespace, +im}:
+      L.sel(Scope, valid_import(name, alias, im), u => scope(rest, LeadingImports{namespace, Con{Import{alias, absolute(name)}, im}}), u => Invalid{})
     case Con{T.Leaf{L.Tok{1, "use", l}}, rest} _:
       Invalid{}
-    case Con{T.Leaf{L.Tok{1, name, l}}, rest} _:
-      L.sel(Scope, unsupported_keyword(name), u => Invalid{}, u => scope(rest, namespace, im, False{}))
-    case Con{n, rest} _:
-      scope(rest, namespace, im, False{})
+    case Con{T.Leaf{L.Tok{1, name, l}}, rest} LeadingImports{namespace, im}:
+      L.sel(Scope, unsupported_keyword(name), u => Invalid{}, u => scope(rest, FileBody{namespace, im}))
+    case Con{T.Leaf{L.Tok{1, name, l}}, rest} FileBody{namespace, im}:
+      L.sel(Scope, unsupported_keyword(name), u => Invalid{}, u => scope(rest, FileBody{namespace, im}))
+    case Con{n, rest} LeadingImports{namespace, im}:
+      scope(rest, FileBody{namespace, im})
+    case Con{n, rest} FileBody{namespace, im}:
+      scope(rest, FileBody{namespace, im})
 
 def namespace_scope(ns: List<&2, T.Node>) -> Scope:
   match ns:
     case Con{T.Leaf{L.Tok{1, "namespace", l}}, Con{T.Leaf{L.Tok{1, +name, n}}, Con{T.Leaf{L.Tok{5, ";", e}}, rest}}}:
-      L.sel(Scope, qualified_name(name, True{}), u => scope(rest, name, [], True{}), u => Invalid{})
+      L.sel(Scope, qualified_name(name, NameStart{}), u => scope(rest, LeadingImports{name, []}), u => Invalid{})
     case ns:
-      scope(ns, "", [], True{})
+      scope(ns, LeadingImports{"", []})
 
 def file_scope(ns: List<&2, T.Node>) -> Scope:
   match ns:
@@ -141,12 +168,12 @@ def imported(xs: List<&2, Import>, +head: String, +tail: String, fallback: Strin
 def relative(parts: String & String, +name: String, namespace: String, im: List<&2, Import>) -> String:
   match parts:
     case (head, tail):
-      L.sel(String, qualified_name(name, True{}), u => imported(im, head, tail, join(namespace, name)), u => "")
+      L.sel(String, qualified_name(name, NameStart{}), u => imported(im, head, tail, join(namespace, name)), u => "")
 
 def resolve(name: String, sc: Scope) -> String:
   match name sc:
     case SCon{'\\', +rest} _:
-      L.sel(String, qualified_name(rest, True{}), u => rest, u => "")
+      L.sel(String, qualified_name(rest, NameStart{}), u => rest, u => "")
     case +name Scope{namespace, im}:
       relative(first_part(name, ""), name, namespace, im)
     case _ Invalid{}:
@@ -190,21 +217,25 @@ def relationship_method(ns: List<&2, T.Node>, method: U32) -> Relationships:
     case _:
       Unknown{method, "unsupported relationship method"}
 
-def relationship_choice(found: Maybe<&2, Relationships>, next: Relationships) -> Maybe<&2, Relationships>:
+def relationship_choice(found: RelationshipState, next: Relationships) -> RelationshipState:
   match found:
-    case None{}:
-      Some{next}
-    case Some{old}:
-      Some{Unknown{0, "duplicate relationship methods"}}
+    case NoRelationships{}:
+      OneRelationship{next}
+    case OneRelationship{old}:
+      ManyRelationships{}
+    case ManyRelationships{}:
+      ManyRelationships{}
 
-def relationships(ns: List<&2, T.Node>, found: Maybe<&2, Relationships>) -> Relationships:
+def relationships(ns: List<&2, T.Node>, found: RelationshipState) -> Relationships:
   match ns:
     case Nil{}:
       match found:
-        case None{}:
-          Unknown{0, "relationship declaration unavailable"}
-        case Some{r}:
+        case NoRelationships{}:
+          Unavailable{}
+        case OneRelationship{r}:
           r
+        case ManyRelationships{}:
+          DuplicateRelationships{}
     case Con{T.Leaf{L.Tok{1, "function", +line}}, Con{T.Leaf{L.Tok{1, "torelationships", n}}, Con{T.Grp{40, p, params}, +rest}}}:
       relationships(rest, relationship_choice(found, relationship_method(rest, line)))
     case Con{n, rest}:
@@ -213,9 +244,15 @@ def relationships(ns: List<&2, T.Node>, found: Maybe<&2, Relationships>) -> Rela
 def visible_relationships(r: Relationships, lines: List<&2, U32>) -> Relationships:
   match r:
     case Literal{+line, names}:
-      L.sel(Relationships, ignored(lines, line), u => Unknown{0, "relationship declaration suppressed"}, u => Literal{line, names})
+      L.sel(Relationships, ignored(lines, line), u => SuppressedRelationships{}, u => Literal{line, names})
     case Unknown{+line, reason}:
-      L.sel(Relationships, ignored(lines, line), u => Unknown{0, "relationship declaration suppressed"}, u => Unknown{line, reason})
+      L.sel(Relationships, ignored(lines, line), u => SuppressedRelationships{}, u => Unknown{line, reason})
+    case Unavailable{}:
+      Unavailable{}
+    case DuplicateRelationships{}:
+      DuplicateRelationships{}
+    case SuppressedRelationships{}:
+      SuppressedRelationships{}
 
 def insert(entries: List<&2, Entry>, +key: String, state: ClassState) -> List<&2, Entry>:
   match entries:
@@ -226,9 +263,12 @@ def insert(entries: List<&2, Entry>, +key: String, state: ClassState) -> List<&2
         u => Con{Entry{identity, Ambiguous{}}, rest},
         u => Con{Entry{identity, old}, insert(rest, key, state)})
 
+def resource_visibility(+resource: Resource, lines: List<&2, U32>, line: U32) -> ClassState:
+  L.sel(ClassState, ignored(lines, line), u => SuppressedResource{resource}, u => ResourceClass{resource})
+
 def class_state(base: String, sc: Scope, key: String, path: String, +line: U32, body: List<&2, T.Node>, +lines: List<&2, U32>) -> ClassState:
   L.sel(ClassState, String.eq(resolve(base, sc), "illuminate\\http\\resources\\jsonapi\\jsonapiresource"),
-    u => ResourceClass{Resource{key, path, line, visible_relationships(relationships(body, None{}), lines)}, Bool.not(ignored(lines, line))},
+    u => resource_visibility(Resource{key, path, line, visible_relationships(relationships(body, NoRelationships{}), lines)}, lines, line),
     u => Other{})
 
 def skip_statement(ns: List<&2, T.Node>) -> List<&2, T.Node>:
@@ -252,20 +292,20 @@ def class_count(ts: List<&2, L.Tok>) -> Nat:
 def declarations(fuel: Nat, ns: List<&2, T.Node>, +sc: Scope, +path: String, +lines: List<&2, U32>, expected: Nat, +entries: List<&2, Entry>) -> Index:
   match fuel ns sc:
     case _ Nil{} _:
-      Index{entries, Bool.not(Nat.is_eq(expected, 0n)), False{}}
+      Index{entries, L.sel(Certainty, Nat.is_eq(expected, 0n), u => Certain{}, u => Uncertain{}), E.Finished{}}
     case 0n _ _:
-      Index{entries, False{}, True{}}
+      Index{entries, Certain{}, E.Exhausted{}}
     case _ _ Invalid{}:
-      Index{entries, True{}, False{}}
+      Index{entries, Uncertain{}, E.Finished{}}
     case 1n+(+p) Con{T.Leaf{L.Tok{1, "class", +line}}, Con{T.Leaf{L.Tok{1, +name, n}}, Con{T.Leaf{L.Tok{1, "extends", e}}, Con{T.Leaf{L.Tok{1, base, b}}, Con{T.Grp{123, c, body}, rest}}}}} Scope{+namespace, +im}:
       +key = join(namespace, name)
-      L.sel(Index, simple_name(name, True{}),
+      L.sel(Index, simple_name(name, NameStart{}),
         u => declarations(p, rest, Scope{namespace, im}, path, lines, Nat.sub(expected, 1n), insert(entries, key, class_state(base, Scope{namespace, im}, key, path, line, body, lines))),
-        u => Index{entries, True{}, False{}})
+        u => Index{entries, Uncertain{}, E.Finished{}})
     case 1n+p Con{T.Leaf{L.Tok{1, "class", l}}, Con{T.Leaf{L.Tok{1, +name, n}}, Con{T.Grp{123, b, body}, rest}}} Scope{+namespace, im}:
-      L.sel(Index, simple_name(name, True{}), u => declarations(p, rest, Scope{namespace, im}, path, lines, Nat.sub(expected, 1n), insert(entries, join(namespace, name), Other{})), u => Index{entries, True{}, False{}})
+      L.sel(Index, simple_name(name, NameStart{}), u => declarations(p, rest, Scope{namespace, im}, path, lines, Nat.sub(expected, 1n), insert(entries, join(namespace, name), Other{})), u => Index{entries, Uncertain{}, E.Finished{}})
     case 1n+p Con{T.Leaf{L.Tok{1, "class", l}}, rest} _:
-      Index{entries, True{}, False{}}
+      Index{entries, Uncertain{}, E.Finished{}}
     case 1n+p Con{T.Leaf{L.Tok{1, "final", l}}, rest} _:
       declarations(p, rest, sc, path, lines, expected, entries)
     case 1n+p Con{T.Leaf{L.Tok{1, "abstract", l}}, rest} _:
@@ -278,27 +318,34 @@ def index_file(source: E.Src, +entries: List<&2, Entry>) -> Index:
     case E.Src{path, text}:
       +tokens = L.qualified(text)
       +nodes = T.tree(L.without_ignores(tokens))
-      L.sel(Index, T.balanced(tokens, []),
-        u => declarations(1n+List.length(&2, L.Tok, tokens), nodes, file_scope(nodes), path, L.ignored_lines(tokens, 0), class_count(L.without_ignores(tokens)), entries),
-        u => Index{entries, True{}, False{}})
+      L.sel(Index, T.balanced(tokens),
+        u => declarations(1n+List.length(&2, L.Tok, tokens), nodes, file_scope(nodes), path, L.ignored_lines(tokens), class_count(L.without_ignores(tokens)), entries),
+        u => Index{entries, Uncertain{}, E.Finished{}})
 
-def index_flags(index: Index, uncertain: Bool, inc: Bool) -> Index:
+def certainty_merge(a: Certainty, b: Certainty) -> Certainty:
+  match a b:
+    case Certain{} Certain{}:
+      Certain{}
+    case _ _:
+      Uncertain{}
+
+def index_flags(index: Index, certainty: Certainty, completion: E.Completion) -> Index:
   match index:
     case Index{es, u, i}:
-      Index{es, uncertain || u, inc || i}
+      Index{es, certainty_merge(certainty, u), E.completion_merge(completion, i)}
 
 def index_sources(sources: List<&2, E.Src>, index: Index) -> Index:
   match sources index:
     case Nil{} index:
       index
-    case Con{source, rest} Index{entries, +uncertain, +inc}:
-      index_sources(rest, index_flags(index_file(source, entries), uncertain, inc))
+    case Con{source, rest} Index{entries, +certainty, +completion}:
+      index_sources(rest, index_flags(index_file(source, entries), certainty, completion))
 
 def resource_lookup(entries: List<&2, Entry>, +key: String) -> Maybe<&2, Resource>:
   match entries:
     case Nil{}:
       None{}
-    case Con{Entry{identity, ResourceClass{r, True{}}}, rest}:
+    case Con{Entry{identity, ResourceClass{r}}, rest}:
       L.sel(Maybe<&2, Resource>, String.eq(identity, key), u => Some{r}, u => resource_lookup(rest, key))
     case Con{entry, rest}:
       resource_lookup(rest, key)
@@ -343,7 +390,7 @@ def route_args(ns: List<&2, T.Node>, sc: Scope, entries: List<&2, Entry>, path: 
 def append_results(a: ScanResult, b: ScanResult) -> ScanResult:
   match a b:
     case ScanResult{rs, es, i} ScanResult{rt, et, j}:
-      ScanResult{List.append(&2, Resource, rs, rt), List.append(&2, Endpoint, es, et), i || j}
+      ScanResult{List.append(&2, Resource, rs, rt), List.append(&2, Endpoint, es, et), E.completion_merge(i, j)}
 
 def after_class(ns: List<&2, T.Node>) -> List<&2, T.Node>:
   match ns:
@@ -365,9 +412,9 @@ def route_statement(ns: List<&2, T.Node>, facade: String, +sc: Scope, entries: L
 def routes(fuel: Nat, ns: List<&2, T.Node>, +sc: Scope, +entries: List<&2, Entry>, +path: String, +lines: List<&2, U32>) -> ScanResult:
   match fuel ns:
     case _ Nil{}:
-      ScanResult{[], [], False{}}
+      ScanResult{[], [], E.Finished{}}
     case 0n _:
-      ScanResult{[], [], True{}}
+      ScanResult{[], [], E.Exhausted{}}
     case 1n+p Con{T.Leaf{L.Tok{1, "class", l}}, rest}:
       routes(p, after_class(rest), sc, entries, path, lines)
     case 1n+p Con{T.Leaf{L.Tok{1, "final", l}}, rest}:
@@ -376,25 +423,25 @@ def routes(fuel: Nat, ns: List<&2, T.Node>, +sc: Scope, +entries: List<&2, Entry
       routes(p, rest, sc, entries, path, lines)
     case 1n+(+p) Con{T.Leaf{L.Tok{1, facade, +line}}, +rest}:
       sites = route_statement(rest, facade, sc, entries, path, line, lines)
-      append_results(ScanResult{[], sites, False{}}, routes(p, skip_statement(rest), sc, entries, path, lines))
+      append_results(ScanResult{[], sites, E.Finished{}}, routes(p, skip_statement(rest), sc, entries, path, lines))
     case 1n+p +ns:
       routes(p, skip_statement(ns), sc, entries, path, lines)
 
 def route_files(sources: List<&2, E.Src>, +entries: List<&2, Entry>) -> ScanResult:
   match sources:
     case Nil{}:
-      ScanResult{[], [], False{}}
+      ScanResult{[], [], E.Finished{}}
     case Con{E.Src{path, text}, rest}:
       +tokens = L.qualified(text)
       +nodes = T.tree(L.without_ignores(tokens))
-      a b = routes(1n+List.length(&2, L.Tok, tokens), nodes, file_scope(nodes), entries, path, L.ignored_lines(tokens, 0)) route_files(rest, entries)
+      a b = routes(1n+List.length(&2, L.Tok, tokens), nodes, file_scope(nodes), entries, path, L.ignored_lines(tokens)) route_files(rest, entries)
       append_results(a, b)
 
 def resources(entries: List<&2, Entry>) -> List<&2, Resource>:
   match entries:
     case Nil{}:
       []
-    case Con{Entry{key, ResourceClass{resource, True{}}}, rest}:
+    case Con{Entry{key, ResourceClass{resource}}, rest}:
       Con{resource, resources(rest)}
     case Con{entry, rest}:
       resources(rest)
@@ -419,16 +466,16 @@ def endpoint_le(a: Endpoint, b: Endpoint) -> Bool:
     case Endpoint{ap, al, ar, Resource{ak, arp, arl, arr}} Endpoint{bp, bl, br, Resource{bk, brp, brl, brr}}:
       location_le(ap, al, ar ++ "\n" ++ ak, bp, bl, br ++ "\n" ++ bk)
 
-def finished(result: ScanResult, entries: List<&2, Entry>, inc: Bool) -> ScanResult:
+def finished(result: ScanResult, entries: List<&2, Entry>, inc: E.Completion) -> ScanResult:
   match result:
     case ScanResult{rs, es, i}:
-      ScanResult{List.sort(~Resource, ~resource_le, resources(entries)), List.sort(~Endpoint, ~endpoint_le, es), inc || i}
+      ScanResult{List.sort(~Resource, ~resource_le, resources(entries)), List.sort(~Endpoint, ~endpoint_le, es), E.completion_merge(inc, i)}
 
 def scanned(index: Index, sources: List<&2, E.Src>) -> ScanResult:
   match index:
-    case Index{+entries, False{}, inc}:
+    case Index{+entries, Certain{}, inc}:
       finished(route_files(sources, entries), entries, inc)
-    case Index{entries, True{}, inc}:
+    case Index{entries, Uncertain{}, inc}:
       ScanResult{[], [], inc}
 
 def relationship_detail(r: Relationships) -> String:
@@ -437,15 +484,25 @@ def relationship_detail(r: Relationships) -> String:
       "literal declared relationships: [" ++ String.join(names, ", ") ++ "]"
     case Unknown{line, reason}:
       reason ++ "; relationships unknown"
+    case Unavailable{}:
+      "relationship declaration unavailable; relationships unknown"
+    case DuplicateRelationships{}:
+      "duplicate relationship methods; relationships unknown"
+    case SuppressedRelationships{}:
+      "relationship declaration suppressed; relationships unknown"
 
 def relationship_observation(r: Relationships, path: String) -> List<&2, E.Site>:
   match r:
     case Literal{+line, names}:
       [E.Observation{path, line, E.JsonApiRelationships{}, E.Possible{}, relationship_detail(Literal{line, names}) ++ "; model resolution unknown"}]
-    case Unknown{0, reason}:
-      []
     case Unknown{+line, reason}:
       [E.Observation{path, line, E.JsonApiRelationships{}, E.Unknown{}, relationship_detail(Unknown{line, reason}) ++ "; model resolution unknown"}]
+    case Unavailable{}:
+      []
+    case DuplicateRelationships{}:
+      []
+    case SuppressedRelationships{}:
+      []
 
 def resource_observations(rs: List<&2, Resource>) -> List<&2, E.Site>:
   match rs:
@@ -465,8 +522,8 @@ def endpoint_observations(es: List<&2, Endpoint>) -> List<&2, E.Site>:
 def evidence(result: ScanResult) -> E.Evidence:
   match result:
     case ScanResult{rs, es, inc}:
-      E.Evidence{List.append(&2, E.Site, resource_observations(rs), endpoint_observations(es)), inc}
+      E.from_completion(List.append(&2, E.Site, resource_observations(rs), endpoint_observations(es)), inc)
 
 def scan(sources: List<&2, E.Src>) -> E.Evidence:
   +ordered = List.sort(~E.Src, ~source_le, sources)
-  evidence(scanned(index_sources(ordered, Index{[], False{}, False{}}), ordered))
+  evidence(scanned(index_sources(ordered, Index{[], Certain{}, E.Finished{}}), ordered))

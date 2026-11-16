@@ -183,19 +183,23 @@ def needs_source(fs: List<&2, Finding>) -> Bool:
     case Con{f, rest}:
       needs_source(rest)
 
+def enrich_match(+n: U32, a: C.Advisory, r: C.AffectedRange, v: String, g: String, evidence: E.Evidence, profile: String) -> List<&2, Finding>:
+  match evidence:
+    case E.Complete{sites}:
+      [Match{n, a, r, v, g, E.for_profile(sites, profile)}]
+    case E.Incomplete{sites}:
+      [Match{n, a, r, v, g, []}, Unknown{n, "source evidence analysis exhausted its budget"}]
+
 def enrich(fs: List<&2, Finding>, +e: E.Evidence) -> List<&2, Finding>:
   match fs:
     case Nil{}:
       []
     case Con{Match{+n, +a, +r, +v, +g, old}, rest}:
       C.Advisory{id, cve, +profile, ranges, sources, functions} = a
-      E.Evidence{+sites, +inc} = e
       found = L.sel(List<&2, Finding>, source_profile(profile),
-        u => L.sel(List<&2, Finding>, inc,
-          v0 => [Match{n, a, r, v, g, []}, Unknown{n, "source evidence analysis exhausted its budget"}],
-          v0 => [Match{n, a, r, v, g, E.for_profile(sites, profile)}]),
+        u => enrich_match(n, a, r, v, g, e, profile),
         u => [Match{n, a, r, v, g, []}])
-      List.append(&2, Finding, found, enrich(rest, E.Evidence{sites, inc}))
+      List.append(&2, Finding, found, enrich(rest, e))
     case Con{f, rest}:
       Con{f, enrich(rest, e)}
 
