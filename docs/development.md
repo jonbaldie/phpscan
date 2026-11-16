@@ -23,9 +23,15 @@ CI checks the same fixtures under each PHP version.
 `src/version.bend` owns the application version.
 `src/advisories.bend` owns inventory validation and dependency matches.
 `src/evidence.bend` owns shared source inputs, evidence variants, and suppression.
+`src/profile-input.bend` owns source validation for all advisory profiles:
+qualified tokens, balanced brackets, root compiler-halt rejection, suppression
+lines, and traversal allowance. Profiles call `parse(source)` and consume its
+`Maybe<Input>` result. `scripts/check-profile-boundary.py`, run by `make lint`,
+rejects direct parser calls, boundary helper calls, and constructed `Input` values
+outside that owner. The taint scanner retains its separate lexer entrypoint.
 `src/symfony.bend` owns the pure, bounded Request path-prefix evidence profile.
 `src/laravel.bend` owns the pure literal-config TokenGuard profile and guard-route links.
-Their qualified lexer entrypoint preserves names without changing taint tokens.
+`src/jsonapi.bend` owns resource declarations and linked JSON:API endpoints.
 `src/json.bend` parses lockfile JSON with source lines.
 `src/versions.bend` compares the supported exact SemVer subset.
 `src/catalog.bend` embeds the pinned advisory snapshot and is generated from

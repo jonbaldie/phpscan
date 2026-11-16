@@ -64,10 +64,10 @@ def route_rows(rs: List<&2, G.Route>) -> String:
 
 def laravel() -> Bool:
   +before = {"<?php\nRoute::middleware('auth:before')->get('/', fn () => [1, 2]);\nuse Illuminate\\Support\\Facades\\Route;\nRoute::middleware('auth:first')->get('/', function () { noop(); });\nRoute::middleware('auth:second')->get('/', fn () => [],);\n" : String}
-  String.eq(route_rows(G.route_file("a", L.qualified(before))), "first:4\nsecond:5\n") &&
-    String.eq(route_rows(G.route_file("a", L.qualified(before ++ "use Other\\Route;"))), "") &&
-    String.eq(route_rows(G.route_file("a", L.qualified(before ++ "unfinished()"))), "") &&
-    String.eq(route_rows(G.route_file("a", L.qualified(before ++ ";;"))), "first:4\nsecond:5\n")
+  String.eq(route_rows(G.route_file("a", before)), "first:4\nsecond:5\n") &&
+    String.eq(route_rows(G.route_file("a", before ++ "use Other\\Route;")), "") &&
+    String.eq(route_rows(G.route_file("a", before ++ "unfinished()")), "") &&
+    String.eq(route_rows(G.route_file("a", before ++ ";;")), "first:4\nsecond:5\n")
 
 def symfony_source(params: String, suffix: String) -> String:
   "<?php namespace App; function handle(" ++ params ++ ") { if (str_starts_with($request->getPathInfo(), '/admin')) { abort_unless(auth()->check(), 403); } } " ++ suffix

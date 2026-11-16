@@ -168,7 +168,11 @@ This restriction excludes earlier receiver reassignment without guessing about
 intervening calls. Logging alone is not an access check. Union types, nullable
 types, unresolved types, complex imports, multiple or braced namespaces,
 malformed bracket sequences, and unsupported flows leave affected-code evidence
-unknown. Traversal fuel derives from the token count. Exhaustion exits 2.
+unknown. A root-level `__halt_compiler` marker discards all profile evidence from
+that file, including evidence before the marker. Other source files remain
+eligible. This conservative policy is shared by all advisory profiles; marker
+text inside comments, strings, or bracketed groups does not trigger it.
+Traversal fuel derives from the token count. Exhaustion exits 2.
 A source-line `phpscan-ignore` removes that site's evidence, not its dependency
 match. GitHub output adds notices at possible source locations.
 Possible evidence does not prove authorization bypass. Runtime exposure,

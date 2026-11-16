@@ -21,6 +21,7 @@ test:
 	python3 tests/test_install.py ./dist/phpscan
 	python3 tests/test_docs.py
 	python3 tests/test_lifecycles.py
+	python3 tests/test_profile_boundary.py
 
 cves:
 	bash tests/cve.sh ./dist/phpscan
