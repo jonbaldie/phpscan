@@ -14,7 +14,7 @@ LITERALS = re.compile(r'"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'|#[^\n]*')
 IMPORT = re.compile(r'^\s*import\s+(\S+)\s+as\s+(\w+)\s*$', re.MULTILINE)
 NAME = r'[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*'
 REFERENCE = re.compile(r'\b([A-Za-z_]\w*)\.(' + NAME + r')\b')
-PATTERN = re.compile(r'\bcase\b[^:]*:')
+PATTERN = re.compile(r'(?<![\w.])case\b[^:]*:')
 TOKEN = re.compile(NAME + r'|==|!=|<=|>=|=>|[^\s]')
 
 

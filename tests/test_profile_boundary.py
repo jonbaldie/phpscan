@@ -65,6 +65,15 @@ class ProfileBoundaryTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertIn('src/future-profile.bend:6:', result.stderr)
 
+    def test_dotted_case_names_are_not_patterns(self):
+        result = self.check_source('import Base\nimport ./profile-input.bend as P\n'
+                                   'def bad() -> P.Input:\n'
+                                   '  forged: P.Input = branch.case(P.Input{[], [], [], 0n})\n'
+                                   '  forged\n'
+                                   'def branch.case(input: P.Input) -> P.Input:\n  input\n')
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('profile-input.parse(source)', result.stderr)
+
     def test_taint_parser_keeps_its_separate_owner(self):
         result = self.check_source('import ./lex.bend as L\nimport ./tree.bend as T\n'
                                    'def scan() -> U32:\n  T.tree(L.without_ignores(L.lex(source)))\n',
