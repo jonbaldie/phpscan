@@ -56,11 +56,15 @@ def pattern_ranges(source):
             if tokens[index][0] != ',':
                 return None
             index += 1
+            if index < len(tokens) and tokens[index][0] == closer:
+                return index + 1
         return None
 
     for index, token in enumerate(tokens):
         if token[0] == 'case':
             end = pattern(index + 1)
+            while end is not None and end < len(tokens) and tokens[end][0] != ':':
+                end = pattern(end)
             if end is not None and end < len(tokens) and tokens[end][0] == ':':
                 ranges.append((token.end(), tokens[end].start()))
             continue

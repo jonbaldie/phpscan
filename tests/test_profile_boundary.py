@@ -57,6 +57,15 @@ class ProfileBoundaryTests(unittest.TestCase):
                 self.assertEqual(result.returncode, 1)
                 self.assertIn('profile-input.parse(source)', result.stderr)
 
+    def test_multiple_case_bodies_cannot_forge_input(self):
+        result = self.check_source('import Base\nimport ./profile-input.bend as P\n'
+                                   'def bad(flag: Bool) -> P.Input:\n'
+                                   '  match flag flag:\n'
+                                   '    case True{} True{}: P.Input{[], [], [], 0n}\n'
+                                   '    case _ _: P.Input{[], [], [], 0n}\n')
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.stderr.count('profile-input.parse(source)'), 2)
+
     def test_comments_and_strings_cannot_create_or_hide_a_violation(self):
         allowed = ('import ./lex.bend as L\n# L.qualified(source)\n'
                    'def text() -> String:\n  "L.qualified(\\\"source\\\")"\n')
