@@ -40,6 +40,12 @@ release evidence.
 and update `PROOF.bend` with relevant implementation changes.
 Run `scripts/bend.sh PROOF.bend` to check it. The proof concerns suppression, not scanner completeness.
 
+## Enforced correction
+
+| Rule | Enforcement |
+| --- | --- |
+| Advisory profiles consume `profile-input.parse(source)`; only that module constructs validated `Input` values. | `make lint` runs `scripts/check-profile-boundary.py` over every source module. CLI profile tests verify unsupported input leaves evidence unknown while dependency matches remain. |
+
 ## Agent skills
 
 ### Issue tracker

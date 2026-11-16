@@ -1,6 +1,7 @@
 import Base
 import ./lex.bend as L
 import ./tree.bend as T
+import ./profile-input.bend as P
 import ./evidence.bend as E
 
 type Relationships is Data:
@@ -106,7 +107,7 @@ def valid_import(name: String, +alias: String, im: List<&2, Import>) -> Bool:
 def unsupported_keyword(+name: String) -> Bool:
   String.eq(name, "endif") || String.eq(name, "endwhile") || String.eq(name, "endfor") ||
     String.eq(name, "endforeach") || String.eq(name, "endswitch") || String.eq(name, "enddeclare") ||
-    String.eq(name, "__halt_compiler") || String.eq(name, "declare")
+    String.eq(name, "declare")
 
 def scope(ns: List<&2, T.Node>, phase: ScopePhase) -> Scope:
   match ns phase:
@@ -313,14 +314,17 @@ def declarations(fuel: Nat, ns: List<&2, T.Node>, +sc: Scope, +path: String, +li
     case 1n+p +ns _:
       declarations(p, skip_statement(ns), sc, path, lines, expected, entries)
 
-def index_file(source: E.Src, +entries: List<&2, Entry>) -> Index:
+def index_input(input: Maybe<&2, P.Input>, path: String, entries: List<&2, Entry>) -> Index:
+  match input:
+    case None{}:
+      Index{entries, Uncertain{}, E.Finished{}}
+    case Some{P.Input{+nodes, tokens, lines, allowance}}:
+      declarations(allowance, nodes, file_scope(nodes), path, lines, class_count(tokens), entries)
+
+def index_file(source: E.Src, entries: List<&2, Entry>) -> Index:
   match source:
     case E.Src{path, text}:
-      +tokens = L.qualified(text)
-      +nodes = T.tree(L.without_ignores(tokens))
-      L.sel(Index, T.balanced(tokens),
-        u => declarations(1n+List.length(&2, L.Tok, tokens), nodes, file_scope(nodes), path, L.ignored_lines(tokens), class_count(L.without_ignores(tokens)), entries),
-        u => Index{entries, Uncertain{}, E.Finished{}})
+      index_input(P.parse(text), path, entries)
 
 def certainty_merge(a: Certainty, b: Certainty) -> Certainty:
   match a b:
@@ -427,14 +431,19 @@ def routes(fuel: Nat, ns: List<&2, T.Node>, +sc: Scope, +entries: List<&2, Entry
     case 1n+p +ns:
       routes(p, skip_statement(ns), sc, entries, path, lines)
 
+def route_input(input: Maybe<&2, P.Input>, path: String, entries: List<&2, Entry>) -> ScanResult:
+  match input:
+    case None{}:
+      ScanResult{[], [], E.Finished{}}
+    case Some{P.Input{+nodes, tokens, lines, allowance}}:
+      routes(allowance, nodes, file_scope(nodes), entries, path, lines)
+
 def route_files(sources: List<&2, E.Src>, +entries: List<&2, Entry>) -> ScanResult:
   match sources:
     case Nil{}:
       ScanResult{[], [], E.Finished{}}
     case Con{E.Src{path, text}, rest}:
-      +tokens = L.qualified(text)
-      +nodes = T.tree(L.without_ignores(tokens))
-      a b = routes(1n+List.length(&2, L.Tok, tokens), nodes, file_scope(nodes), entries, path, L.ignored_lines(tokens)) route_files(rest, entries)
+      a b = route_input(P.parse(text), path, entries) route_files(rest, entries)
       append_results(a, b)
 
 def resources(entries: List<&2, Entry>) -> List<&2, Resource>:

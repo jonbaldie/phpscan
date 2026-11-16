@@ -3,9 +3,10 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 sh -n install.sh
 for f in scripts/*.sh tests/*.sh; do bash -n "$f"; done
-python3 -m py_compile tests/test_cli.py tests/test_advisories.py tests/test_symfony.py tests/test_laravel.py tests/test_jsonapi.py tests/test_install.py tests/test_docs.py tests/test_lifecycles.py scripts/compare-state-machines.py scripts/check-docs.py scripts/catalog.py
+python3 -m py_compile tests/test_cli.py tests/test_advisories.py tests/test_symfony.py tests/test_laravel.py tests/test_jsonapi.py tests/test_install.py tests/test_docs.py tests/test_lifecycles.py tests/test_profile_boundary.py scripts/compare-state-machines.py scripts/check-docs.py scripts/check-profile-boundary.py scripts/catalog.py
 python3 scripts/catalog.py --check
 python3 scripts/check-docs.py
+python3 scripts/check-profile-boundary.py
 git diff --check
 scripts/bend.sh src/main.bend --check-only
 scripts/bend.sh tests/version-order.bend | grep -qx 0
@@ -20,3 +21,4 @@ scripts/bend.sh tests/explicit-tree.bend | grep -qx 0
 scripts/bend.sh tests/analysis-machines.bend | grep -qx 0
 scripts/bend.sh tests/analysis-budgets.bend | grep -qx 0
 scripts/bend.sh tests/profile-machines.bend | grep -qx 0
+scripts/bend.sh tests/profile-boundary.bend | grep -qx 0

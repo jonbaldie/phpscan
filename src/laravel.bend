@@ -1,6 +1,7 @@
 import Base
 import ./lex.bend as L
 import ./tree.bend as T
+import ./profile-input.bend as P
 import ./evidence.bend as E
 
 type Field is Data:
@@ -105,18 +106,24 @@ def returned(ns: List<&2, T.Node>) -> Maybe<&2, List<&2, Field>>:
     case _:
       None{}
 
-def parse_config(+path: String, +tokens: List<&2, L.Tok>) -> Maybe<&2, Config>:
-  do Maybe<&2, Config>:
-    fs : List<&2, Field> <- L.sel(Maybe<&2, List<&2, Field>>, T.balanced(tokens),
-      u => returned(T.tree(L.without_ignores(tokens))), u => None{})
-    return Config{path, fs, L.ignored_lines(tokens)}
+def config_input(input: Maybe<&2, P.Input>, path: String) -> Maybe<&2, Config>:
+  match input:
+    case None{}:
+      None{}
+    case Some{P.Input{nodes, tokens, ignores, allowance}}:
+      do Maybe<&2, Config>:
+        fs : List<&2, Field> <- returned(nodes)
+        return Config{path, fs, ignores}
+
+def parse_config(path: String, source: String) -> Maybe<&2, Config>:
+  config_input(P.parse(source), path)
 
 def config(xs: List<&2, E.Src>, +path: String) -> Maybe<&2, Config>:
   match xs:
     case Nil{}:
       None{}
     case Con{E.Src{+p, t}, rest}:
-      L.sel(Maybe<&2, Config>, String.eq(p, path), u => parse_config(p, L.qualified(t)), u => config(rest, path))
+      L.sel(Maybe<&2, Config>, String.eq(p, path), u => parse_config(p, t), u => config(rest, path))
 
 def valid_entries(fs: List<&2, Field>) -> Bool:
   match fs:
@@ -178,7 +185,7 @@ def unsupported_context(ns: List<&2, T.Node>) -> Bool:
     case Con{T.Leaf{L.Tok{1, +name, l}}, rest}:
       String.eq(name, "endif") || String.eq(name, "endwhile") || String.eq(name, "endfor") ||
         String.eq(name, "endforeach") || String.eq(name, "endswitch") || String.eq(name, "enddeclare") ||
-        String.eq(name, "__halt_compiler") || unsupported_context(rest)
+        unsupported_context(rest)
     case Con{n, rest}:
       unsupported_context(rest)
 
@@ -274,15 +281,20 @@ def route_statements(ss: List<&2, List<&2, T.Node>>, state: RouteState, +path: S
     case Con{ns, rest} ReadingRoutes{+im, rs}:
       route_statements(rest, ReadingRoutes{im, List.append(&2, Route, route(ns, im, path, ignores), rs)}, path, ignores)
 
-def route_file(path: String, +ts: List<&2, L.Tok>) -> List<&2, Route>:
-  parsed = do Maybe<&2, List<&2, Route>>:
-    +ns : List<&2, T.Node> <- L.sel(Maybe<&2, List<&2, T.Node>>, T.balanced(ts),
-      u => Some{T.tree(L.without_ignores(ts))}, u => None{})
-    ss : List<&2, List<&2, T.Node>> <- L.sel(Maybe<&2, List<&2, List<&2, T.Node>>>, unsupported_context(ns),
-      u => None{}, u => statements(ns, StatementBoundary{}, []))
-    rs : List<&2, Route> <- route_statements(ss, ReadingRoutes{[], []}, path, L.ignored_lines(ts))
-    return rs
-  Maybe.default(&2, List<&2, Route>, parsed, [])
+def route_input(input: Maybe<&2, P.Input>, path: String) -> List<&2, Route>:
+  match input:
+    case None{}:
+      []
+    case Some{P.Input{+ns, tokens, ignores, allowance}}:
+      parsed = do Maybe<&2, List<&2, Route>>:
+        ss : List<&2, List<&2, T.Node>> <- L.sel(Maybe<&2, List<&2, List<&2, T.Node>>>, unsupported_context(ns),
+          u => None{}, u => statements(ns, StatementBoundary{}, []))
+        rs : List<&2, Route> <- route_statements(ss, ReadingRoutes{[], []}, path, ignores)
+        return rs
+      Maybe.default(&2, List<&2, Route>, parsed, [])
+
+def route_file(path: String, source: String) -> List<&2, Route>:
+  route_input(P.parse(source), path)
 
 def join(+root: String, +relative: String) -> String:
   L.sel(String, String.ends_with(root, "/"), u => root ++ relative, u => root ++ "/" ++ relative)
@@ -294,7 +306,7 @@ def route_sources(xs: List<&2, E.Src>, +prefix: String) -> List<&2, Route>:
     case Con{E.Src{+path, text}, rest}:
       +relative = String.drop(path, String.length(prefix))
       here = L.sel(List<&2, Route>, String.starts_with(path, prefix) && String.ends_with(relative, ".php") &&
-        Bool.not(String.contains(relative, "/")), u => route_file(path, L.qualified(text)), u => [])
+        Bool.not(String.contains(relative, "/")), u => route_file(path, text), u => [])
       List.append(&2, Route, here, route_sources(rest, prefix))
 
 def link_route(+g: Guard, +r: Route) -> List<&2, LinkedGuardRoute>:

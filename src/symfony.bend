@@ -1,6 +1,7 @@
 import Base
 import ./lex.bend as L
 import ./tree.bend as T
+import ./profile-input.bend as P
 
 import ./evidence.bend as E
 
@@ -133,8 +134,12 @@ def functions(fuel: Nat, ns: List<&2, T.Node>, +im: List<&2, Import>, +path: Str
 def analyze(+ns: List<&2, T.Node>, path: String, fuel: Nat) -> E.Evidence:
   L.sel(E.Evidence, simple_scope(ns, NoNamespace{}), u => functions(fuel, ns, imports(ns), path), u => E.Complete{[]})
 
+def scan_input(input: Maybe<&2, P.Input>, path: String) -> E.Evidence:
+  match input:
+    case None{}:
+      E.Complete{[]}
+    case Some{P.Input{nodes, tokens, ignores, allowance}}:
+      E.suppress(analyze(nodes, path, allowance), ignores)
+
 def scan(path: String, source: String) -> E.Evidence:
-  +tokens = L.qualified(source)
-  L.sel(E.Evidence, T.balanced(tokens),
-    u => E.suppress(analyze(T.tree(L.without_ignores(tokens)), path, 1n+List.length(&2, L.Tok, tokens)), L.ignored_lines(tokens)),
-    u => E.Complete{[]})
+  scan_input(P.parse(source), path)

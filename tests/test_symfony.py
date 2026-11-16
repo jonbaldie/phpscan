@@ -221,6 +221,47 @@ class SymfonyTests(unittest.TestCase):
         self.source.write_text(SOURCE)
         self.assertIn('possible', self.scan().stdout)
 
+    def test_compiler_halt_leaves_source_evidence_unknown(self):
+        self.inventory()
+        for source in [SOURCE.replace('class PrefixAccess', '__halt_compiler();\nclass PrefixAccess'),
+                       SOURCE.replace('class PrefixAccess', '__HALT_COMPILER();\nclass PrefixAccess'),
+                       SOURCE + '\n__halt_compiler();\n']:
+            with self.subTest(source=source):
+                self.source.write_text(source)
+                result = self.scan('sarif')
+                self.assertEqual(result.returncode, 1, result.stderr)
+                finding, = json.loads(result.stdout)['runs'][0]['results']
+                self.assertEqual(finding['ruleId'], GHSA)
+                self.assertEqual(finding['properties']['affectedCode'], 'unknown')
+                self.assertEqual(finding['properties']['sourceEvidence'], [])
+
+    def test_compiler_halt_marker_text_does_not_discard_valid_evidence(self):
+        self.inventory()
+        for marker in ['// __halt_compiler();\n',
+                       '$text = "__halt_compiler();";\n',
+                       "$text = <<<'DATA'\n__halt_compiler();\nDATA;\n",
+                       'function example() { __halt_compiler(); }\n']:
+            with self.subTest(marker=marker):
+                self.source.write_text(SOURCE.replace('class PrefixAccess', marker + 'class PrefixAccess'))
+                result = self.scan('sarif')
+                self.assertEqual(result.returncode, 1, result.stderr)
+                finding, = json.loads(result.stdout)['runs'][0]['results']
+                self.assertEqual(finding['properties']['affectedCode'], 'possible')
+                self.assertEqual(len(finding['properties']['sourceEvidence']), 1)
+
+    def test_compiler_halt_does_not_discard_another_files_evidence(self):
+        self.inventory()
+        self.source.write_text(SOURCE.replace('class PrefixAccess', '__halt_compiler();\nclass PrefixAccess'))
+        valid = self.root / 'ValidAccess.php'
+        valid.write_text(SOURCE)
+        result = self.scan('sarif')
+        self.assertEqual(result.returncode, 1, result.stderr)
+        finding, = json.loads(result.stdout)['runs'][0]['results']
+        self.assertEqual(finding['properties']['affectedCode'], 'possible')
+        self.assertEqual(len(finding['properties']['sourceEvidence']), 1)
+        evidence = finding['properties']['sourceEvidence'][0]
+        self.assertEqual(evidence['sourcePath'], str(valid))
+
     def test_source_size_does_not_create_an_arbitrary_small_budget_failure(self):
         self.inventory()
         self.source.write_text(SOURCE.replace('class PrefixAccess', '$unused = 0;\n' * 600 + 'class PrefixAccess'))
