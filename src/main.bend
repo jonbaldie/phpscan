@@ -480,21 +480,75 @@ def found(+p: String, r: Result<&1, &1, U32 & String, U32 & (String & String)>) 
         u => IO.pure(List<&2, String>, nonempty(String.lines(out))),
         u => IO.die(List<&2, String>, 2, "phpscan: cannot list " ++ p ++ ": " ++ String.trim_end(err)))
 
+def pick(walked: List<&2, String>, explicit: List<&2, String>) -> List<&2, String>:
+  match walked:
+    case Nil{}:
+      explicit
+    case Con{x, rest}:
+      Con{x, rest}
+
+def link_filter(ss: List<&2, String>) -> IO(List<&2, String>):
+  match ss:
+    case Nil{}:
+      IO.pure(List<&2, String>, [])
+    case Con{+p, rest}:
+      do IO<List<&2, String>>:
+        +tail : List<&2, String> <- link_filter(rest)
+        dr : Result<&1, &1, U32 & String, U32 & (String & String)> <-
+          Process.run("find", ["-L", safe_path(p), "-maxdepth", "0", "-type", "d"], "", 268435456, 120000)
+        dirs : List<&2, String> <- found(p, dr)
+        fr : Result<&1, &1, U32 & String, U32 & (String & String)> <-
+          Process.run("find", ["-L", safe_path(p), "-maxdepth", "0", "-type", "f"], "", 268435456, 120000)
+        files : List<&2, String> <- found(p, fr)
+        L.sel(IO(List<&2, String>), List.is_empty(&2, String, dirs),
+          u => L.sel(IO(List<&2, String>), List.is_empty(&2, String, files),
+            v => IO.die(List<&2, String>, 2, "phpscan: cannot list " ++ p ++ ": not a regular file"),
+            v => IO.pure(List<&2, String>, Con{p, tail})),
+          u => IO.pure(List<&2, String>, tail))
+
+def explicit_sources(+p: String) -> IO(List<&2, String>):
+  do IO<List<&2, String>>:
+    r : Result<&1, &1, U32 & String, U32 & (String & String)> <-
+      Process.run("find", ["-L", safe_path(p), "-maxdepth", "0", "-type", "f", "!", "-name", "composer.lock"], "", 268435456, 120000)
+    found(p, r)
+
+def check_input(+p: String, files: List<&2, String>, dirs: List<&2, String>) -> IO(List<&2, String>):
+  match files:
+    case Nil{}:
+      L.sel(IO(List<&2, String>), List.is_empty(&2, String, dirs),
+        u => IO.die(List<&2, String>, 2, "phpscan: cannot list " ++ p ++ ": not a regular file"),
+        u => IO.pure(List<&2, String>, []))
+    case Con{x, rest}:
+      IO.pure(List<&2, String>, Con{x, rest})
+
 def list_one(+p: String) -> IO(List<&2, String>):
   do IO<List<&2, String>>:
     r : Result<&1, &1, U32 & String, U32 & (String & String)> <-
       Process.run("find", [safe_path(p), "-type", "f", "(", "-name", "*.php", "-o", "-name", "*.phtml", "-o", "-name", "*.inc", ")"], "", 268435456, 120000)
-    sources : List<&2, String> <- found(p, r)
+    walked : List<&2, String> <- found(p, r)
+    rk : Result<&1, &1, U32 & String, U32 & (String & String)> <-
+      Process.run("find", [safe_path(p), "-type", "l", "(", "-name", "*.php", "-o", "-name", "*.phtml", "-o", "-name", "*.inc", ")"], "", 268435456, 120000)
+    syms : List<&2, String> <- found(p, rk)
+    links : List<&2, String> <- link_filter(syms)
+    walked2 : List<&2, String> <- IO.pure(List<&2, String>, List.append(&2, String, walked, links))
+    explicit : List<&2, String> <- explicit_sources(p)
+    sources : List<&2, String> <- IO.pure(List<&2, String>, pick(walked2, explicit))
     locks : Result<&1, &1, U32 & String, U32 & (String & String)> <-
-      Process.run("find", [safe_path(p), "-maxdepth", "1", "-type", "f", "-name", "composer.lock"], "", 268435456, 120000)
-    inventory : List<&2, String> <- found(p, locks)
-    return List.append(&2, String, sources, inventory)
+      Process.run("find", [safe_path(p), "-maxdepth", "1", "(", "-type", "f", "-o", "-type", "l", ")", "-name", "composer.lock"], "", 268435456, 120000)
+    lockraw : List<&2, String> <- found(p, locks)
+    inventory : List<&2, String> <- link_filter(lockraw)
+    files : List<&2, String> <- IO.pure(List<&2, String>, List.append(&2, String, sources, inventory))
+    dr2 : Result<&1, &1, U32 & String, U32 & (String & String)> <-
+      Process.run("find", ["-L", safe_path(p), "-maxdepth", "0", "-type", "d"], "", 268435456, 120000)
+    dirs : List<&2, String> <- found(p, dr2)
+    check_input(p, files, dirs)
 
 def list_boundaries(+p: String) -> IO(List<&2, String>):
   do IO<List<&2, String>>:
     r : Result<&1, &1, U32 & String, U32 & (String & String)> <-
-      Process.run("find", [safe_path(p), "-mindepth", "2", "-type", "f", "(", "-name", "composer.json", "-o", "-name", "composer.lock", ")"], "", 268435456, 120000)
-    found(p, r)
+      Process.run("find", [safe_path(p), "-mindepth", "2", "(", "-type", "f", "-o", "-type", "l", ")", "(", "-name", "composer.json", "-o", "-name", "composer.lock", ")"], "", 268435456, 120000)
+    raw : List<&2, String> <- found(p, r)
+    link_filter(raw)
 
 def got(+p: String, r: Result<&1, &1, U32 & String, U32 & (String & String)>) -> IO(E.Src):
   match r:
@@ -557,13 +611,122 @@ def report.path(r: Rep) -> String:
     case Inventory{p, fs}:
       p
 
+def segs(xs: List<&2, String>) -> List<&2, String>:
+  match xs:
+    case Nil{}:
+      []
+    case Con{+x, +rest}:
+      L.sel(List<&2, String>, String.eq(x, "") || String.eq(x, "."), u => segs(rest), u => Con{x, segs(rest)})
+
+def canon(+p: String) -> String:
+  +pre = L.sel(String, String.starts_with(p, "/"), u => "/", u => "")
+  pre ++ String.join(segs(String.split(p, '/')), "/")
+
+def finding_bare(f: A.Finding) -> Bool:
+  match f:
+    case A.Match{a, b, c, d, e, sites}:
+      Bool.not(E.possible(sites))
+    case _:
+      False{}
+
+def count_bare(fs: List<&2, A.Finding>) -> U32:
+  match fs:
+    case Nil{}:
+      0
+    case Con{f, rest}:
+      U32.add(L.sel(U32, finding_bare(f), u => 1, u => 0), count_bare(rest))
+
+def count_unknowns(fs: List<&2, A.Finding>) -> U32:
+  match fs:
+    case Nil{}:
+      0
+    case Con{f, rest}:
+      U32.add(L.sel(U32, A.incomplete(f), u => 1, u => 0), count_unknowns(rest))
+
+def unknowns(r: Rep) -> U32:
+  match r:
+    case Rep{p, fs}:
+      0
+    case Inventory{p, fs}:
+      count_unknowns(fs)
+
+def bare(r: Rep) -> U32:
+  match r:
+    case Rep{p, fs}:
+      0
+    case Inventory{p, fs}:
+      count_bare(fs)
+
 def report.le(a: Rep, b: Rep) -> Bool:
-  String.is_le(report.path(a), report.path(b))
+  +x = a
+  +y = b
+  +ca = canon(report.path(x))
+  +cb = canon(report.path(y))
+  +ux = unknowns(x)
+  +uy = unknowns(y)
+  +wx = bare(x)
+  +wy = bare(y)
+  +px = report.path(x)
+  +py = report.path(y)
+  L.sel(Bool, String.eq(ca, cb),
+    u => L.sel(Bool, U32.is_eq(ux, uy),
+      v => L.sel(Bool, U32.is_eq(wx, wy),
+        w => String.is_le(px, py),
+        w => U32.is_le(wx, wy)),
+      v => U32.is_gt(ux, uy)),
+    v => String.is_le(ca, cb))
+
+def finding.eq(x: S.Finding, y: S.Finding) -> Bool:
+  match x y:
+    case S.Finding{l1, c1, s1} S.Finding{l2, c2, s2}:
+      U32.is_eq(l1, l2) && U32.is_eq(c1, c2) && String.eq(s1, s2)
+    case a b:
+      False{}
+
+def findings.eq(xs: List<&2, S.Finding>, ys: List<&2, S.Finding>) -> Bool:
+  match xs ys:
+    case Nil{} Nil{}:
+      True{}
+    case Con{x, xr} Con{y, yr}:
+      finding.eq(x, y) && findings.eq(xr, yr)
+    case a b:
+      False{}
+
+def rep.eq(x: Rep, y: Rep) -> Bool:
+  match x y:
+    case Rep{p1, f1} Rep{p2, f2}:
+      String.eq(canon(p1), canon(p2)) && findings.eq(f1, f2)
+    case Inventory{p1, f1} Inventory{p2, f2}:
+      String.eq(canon(p1), canon(p2)) && A.findings.eq(A.drop_unknown(f1), A.drop_unknown(f2))
+    case a b:
+      False{}
+
+def seen(seen1: List<&2, Rep>, +r: Rep) -> Bool:
+  match seen1:
+    case Nil{}:
+      False{}
+    case Con{y, rest}:
+      rep.eq(y, r) || seen(rest, r)
+
+def dedupe_go(rs: List<&2, Rep>, +path: String, +seen1: List<&2, Rep>) -> List<&2, Rep>:
+  match rs:
+    case Nil{}:
+      []
+    case Con{+x, +rest}:
+      L.sel(List<&2, Rep>, String.eq(canon(report.path(x)), path),
+        u => L.sel(List<&2, Rep>, seen(seen1, x),
+                  v => dedupe_go(rest, path, seen1),
+                  v => Con{x, dedupe_go(rest, path, Con{x, seen1})}),
+        u => Con{x, dedupe_go(rest, canon(report.path(x)), [x])})
+
+def dedupe(rs: List<&2, Rep>) -> List<&2, Rep>:
+  dedupe_go(rs, "", [])
 
 def run(+fmt: Format, ps: List<&2, String>) -> IO(Unit):
   do IO<Unit>:
     +rs : List<&2, Rep> <- projects(ps)
-    finish(fmt, U32.from_nat(List.length(&2, Rep, rs)), List.sort(~Rep, ~report.le, rs))
+    +out : List<&2, Rep> <- IO.pure(List<&2, Rep>, dedupe(List.sort(~Rep, ~report.le, rs)))
+    finish(fmt, U32.from_nat(List.length(&2, Rep, out)), out)
 
 # ---------------------------------------------------------------- arguments
 

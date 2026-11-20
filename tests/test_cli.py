@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import json
+import os
 import pathlib
 import subprocess
 import sys
@@ -73,6 +74,146 @@ class CliTests(unittest.TestCase):
         self.assertNotIn('ignored.txt', result.stdout)
         self.assertLess(result.stdout.index('more.phtml'), result.stdout.index('unsafe.php'))
 
+    @unittest.skipUnless(hasattr(os, 'symlink'), 'symlinks required')
+    @unittest.skipUnless(hasattr(os, 'symlink'), 'symlinks required')
+    def test_symlinked_files_scanned(self):
+        os.symlink(self.bad, self.root / 'link.php')
+        explicit = self.run_cli(self.root / 'link.php')
+        self.assertEqual(explicit.returncode, 1, explicit.stderr)
+        self.assertIn('link.php:2: [PHP-XSS]', explicit.stdout)
+        in_dir = self.run_cli(self.root)
+        self.assertEqual(in_dir.returncode, 1)
+        self.assertEqual(in_dir.stderr, 'phpscan: 3 files, 2 findings, 0 incomplete\n')
+        self.assertIn('link.php:2: [PHP-XSS]', in_dir.stdout)
+        self.assertIn('unsafe.php:2: [PHP-XSS]', in_dir.stdout)
+
+    @unittest.skipUnless(hasattr(os, 'symlink'), 'symlinks required')
+    def test_symlinked_lockfile_supplies_advisories(self):
+        lock = self.root / 'real-lock.json'
+        lock.write_text(json.dumps({'packages': [{'name': 'livewire/livewire', 'version': '3.6.3'}]}))
+        os.symlink(lock, self.root / 'composer.lock')
+        result = self.run_cli(self.root)
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn('GHSA-29cq-5w36-x7w3', result.stdout)
+        explicit = self.run_cli(self.root / 'composer.lock')
+        self.assertEqual(explicit.returncode, 1, explicit.stderr)
+        self.assertIn('GHSA-29cq-5w36-x7w3', explicit.stdout)
+
+    @unittest.skipUnless(hasattr(os, 'symlink') and hasattr(os, 'mkfifo'), 'symlinks and fifos required')
+    def test_unresolvable_inputs_exit_two(self):
+        dangling = self.root / 'broken.php'
+        os.symlink(self.root / 'nowhere.php', dangling)
+        result = self.run_cli(self.root)
+        self.assertEqual(result.returncode, 2, result.stdout)
+        self.assertIn('cannot list', result.stderr)
+        explicit = self.run_cli(self.root / 'broken.php')
+        self.assertEqual(explicit.returncode, 2, explicit.stdout)
+        self.assertIn('cannot list', explicit.stderr)
+        txt = self.root / 'broken.txt'
+        os.symlink(self.root / 'nowhere.txt', txt)
+        result = self.run_cli(txt)
+        self.assertEqual(result.returncode, 2, result.stdout)
+        self.assertIn('cannot list', result.stderr)
+        fifo = self.root / 'p.fifo'
+        os.mkfifo(fifo)
+        result = self.run_cli(fifo)
+        self.assertEqual(result.returncode, 2, result.stdout)
+        self.assertIn('cannot list', result.stderr)
+
+    @unittest.skipUnless(hasattr(os, 'symlink'), 'symlinks required')
+    def test_symlink_to_directory_is_not_followed(self):
+        target = self.root / 'target'
+        target.mkdir()
+        (target / 'bad.php').write_text("<?php echo $_GET['x'];")
+        link = self.root / 'realdir'
+        os.symlink(target, link, target_is_directory=True)
+        result = self.run_cli(link)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, '')
+        self.assertEqual(result.stderr, 'phpscan: 0 files, 0 findings, 0 incomplete\n')
+
+    def test_overlapping_spellings_do_not_duplicate_findings(self):
+        sub = self.root / 'sub'
+        sub.mkdir()
+        evil = sub / 'a.php'
+        evil.write_text("<?php echo $_GET['x'];")
+        result = self.run_cli('--format=sarif', '.', 'sub/a.php')
+        self.assertEqual(result.returncode, 1, result.stderr)
+        results = json.loads(result.stdout)['runs'][0]['results']
+        uris = [r['locations'][0]['physicalLocation']['artifactLocation']['uri'] for r in results
+                if r['ruleId'] == 'PHP-XSS' and r['locations'][0]['physicalLocation']['artifactLocation']['uri'].endswith('sub/a.php')]
+        self.assertEqual(len(uris), 1, results)
+
+    def test_symfony_lockfile_overlap_prefers_settled_evidence(self):
+        fixture = r'''<?php
+namespace App\Http\Middleware;
+use Closure;
+use Illuminate\Http\Request;
+class PrefixAccess
+{
+    public function handle(Request $request, Closure $next)
+    {
+        if (str_starts_with($request->getPathInfo(), '/admin')) {
+            abort_unless(auth()->check(), 403);
+        }
+        return $next($request);
+    }
+}
+'''
+        proj = self.root / 'app'
+        proj.mkdir()
+        (proj / 'PrefixAccess.php').write_text(fixture)
+        lock = proj / 'composer.lock'
+        lock.write_text(json.dumps({
+            'packages': [{'name': 'symfony/http-foundation', 'version': 'v7.3.6'}],
+            'packages-dev': [],
+        }))
+        for paths in [(proj, lock), (lock, proj)]:
+            result = self.run_cli('--format=sarif', *paths)
+            self.assertEqual(result.returncode, 1, result.stderr)
+            results = json.loads(result.stdout)['runs'][0]['results']
+            self.assertEqual(len(results), 1)
+            self.assertEqual(results[0]['properties']['affectedCode'], 'possible')
+            self.assertIn('phpscan: 2 files,', result.stderr)
+
+    def test_explicit_files_scanned_regardless_of_extension(self):
+        upper = self.root / 'UPPER.PHP'
+        upper.write_text("<?php echo $_GET['x'];")
+        result = self.run_cli(upper)
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn('PHP-XSS', result.stdout)
+        notes = self.root / 'notes.txt'
+        notes.write_text("<?php echo $_GET['x'];")
+        result = self.run_cli(notes)
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn('PHP-XSS', result.stdout)
+        lock = self.root / 'composer.lock'
+        lock.write_text('{"packages":[{"name":"livewire/livewire","version":"3.6.3","desc":"<?php echo $_GET[q];"}]}')
+        result = self.run_cli(lock)
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn('GHSA-29cq-5w36-x7w3', result.stdout)
+        self.assertNotIn('[PHP-', result.stdout)
+
+    def test_overlapping_inputs_do_not_duplicate_findings(self):
+        result = self.run_cli(self.root, self.bad)
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.stderr, 'phpscan: 2 files, 1 findings, 0 incomplete\n')
+        self.assertEqual(result.stdout.count('PHP-XSS'), 1)
+        result = self.run_cli(self.bad, self.bad)
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.stderr, 'phpscan: 1 files, 1 findings, 0 incomplete\n')
+        self.assertEqual(result.stdout.count('PHP-XSS'), 1)
+        proj = self.root / 'lockproj'
+        proj.mkdir()
+        (proj / 'app.php').write_text('<?php\n')
+        lock = proj / 'composer.lock'
+        lock.write_text(json.dumps({'packages': [{'name': 'livewire/livewire', 'version': '3.6.3'}]}))
+        result = self.run_cli(proj, lock)
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.stderr, 'phpscan: 2 files, 1 findings, 0 incomplete\n')
+        self.assertIn('GHSA-29cq-5w36-x7w3', result.stdout)
+        self.assertEqual(len([line for line in result.stdout.splitlines() if line]), 1)
+
     def test_sarif_from_actual_scan(self):
         result = self.run_cli('--format=sarif', self.bad)
         self.assertEqual(result.returncode, 1)
@@ -114,6 +255,20 @@ class CliTests(unittest.TestCase):
                 self.assertEqual(result.returncode, 2)
                 self.assertEqual(result.stdout, '')
                 self.assertNotEqual(result.stderr, '')
+
+    @unittest.skipUnless(hasattr(os, 'symlink') and hasattr(os, 'mkfifo'), 'symlinks and fifos required')
+    def test_symlink_to_fifo_fails_fast(self):
+        fifo = self.root / 'p.fifo'
+        os.mkfifo(fifo)
+        link = self.root / 'fifo.php'
+        os.symlink(fifo, link)
+        import time
+        started = time.time()
+        result = self.run_cli(self.root)
+        elapsed = time.time() - started
+        self.assertEqual(result.returncode, 2, result.stdout)
+        self.assertLess(elapsed, 60)
+        self.assertIn('not a regular file', result.stderr)
 
     def test_multiple_input_paths(self):
         result = self.run_cli(self.clean, self.bad)

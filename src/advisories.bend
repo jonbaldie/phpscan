@@ -208,5 +208,30 @@ def finding.le(a: Finding, b: Finding) -> Bool:
   +y = b
   L.sel(Bool, U32.is_eq(line(x), line(y)), u => String.is_le(rule(x), rule(y)), u => U32.is_le(line(x), line(y)))
 
+def drop_unknown(fs: List<&2, Finding>) -> List<&2, Finding>:
+  match fs:
+    case Nil{}:
+      []
+    case Con{+f, +rest}:
+      L.sel(List<&2, Finding>, incomplete(f), u => drop_unknown(rest), u => Con{f, drop_unknown(rest)})
+
+def finding.eq(x: Finding, y: Finding) -> Bool:
+  match x y:
+    case Match{n1, a1, r1, v1, g1, s1} Match{n2, a2, r2, v2, g2, s2}:
+      U32.is_eq(n1, n2) && C.advisory.eq(a1, a2) && C.range.eq(r1, r2) && String.eq(v1, v2) && String.eq(g1, g2)
+    case Unknown{n1, q1} Unknown{n2, q2}:
+      U32.is_eq(n1, n2) && String.eq(q1, q2)
+    case a b:
+      False{}
+
+def findings.eq(xs: List<&2, Finding>, ys: List<&2, Finding>) -> Bool:
+  match xs ys:
+    case Nil{} Nil{}:
+      True{}
+    case Con{x, xr} Con{y, yr}:
+      finding.eq(x, y) && findings.eq(xr, yr)
+    case a b:
+      False{}
+
 def scan(s: String) -> List<&2, Finding>:
   List.sort(~Finding, ~finding.le, decoded(J.read(s)))

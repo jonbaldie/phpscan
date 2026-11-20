@@ -22,14 +22,26 @@ document, including an empty results array for a clean scan.
 | 2 | Invalid arguments, a discovery/read error, or reported incomplete analysis. This takes precedence over findings. |
 
 File discovery includes `.php`, `.phtml`, and `.inc` names, sorts the paths,
-and scans files independently. Each explicitly scanned directory also checks
+and scans files independently. A file explicitly named on the command line is
+scanned regardless of its extension, except a file named `composer.lock`, which
+is advisory inventory only. A README or note containing example code will be
+flagged because the scanner treats it as PHP. Symlinked files are scanned
+through their links,
+under both the link name and the target name when both appear in a scanned
+tree. Each explicitly scanned directory also checks
 its immediate `composer.lock`. An explicit `composer.lock` file is supported.
-Nested lockfiles are not discovered unless their directory is an input.
-The summary's file count includes lockfiles.
-Symlinked directories are not followed.
-Overlapping input directories can scan a file more than once.
+Nested lockfiles are not discovered unless their directory is an input. A
+discovered symlink that cannot be read (including dangling links) is an error,
+as is an explicit input that is neither a directory nor resolves to a regular file.
+The summary's file count includes lockfiles and counts each unique file once;
+path spellings such as `./a.php` and `a.php` are treated as the same file.
+Symlinked directories are not followed, including when a symlink to a
+directory is an explicit input.
 An empty directory returns 0. Paths with newline characters are unsupported.
-Use `./` before a path whose name starts with `-`.
+Use `./` before a path whose name starts with `-`. Overlap between inputs does
+not duplicate identical findings; between different views of the same file, the
+view with settled affected-code evidence is preferred over one that reports
+its evidence as unknown.
 
 ## Supported platforms
 
@@ -173,8 +185,9 @@ that file, including evidence before the marker. Other source files remain
 eligible. This conservative policy is shared by all advisory profiles; marker
 text inside comments, strings, or bracketed groups does not trigger it.
 Traversal fuel derives from the token count. Exhaustion exits 2.
-A source-line `phpscan-ignore` removes that site's evidence, not its dependency
-match. GitHub output adds notices at possible source locations.
+A source-line `phpscan-ignore` anywhere on a site's evidence lines removes
+that site's evidence, not its dependency match. GitHub output adds notices at
+possible source locations.
 Possible evidence does not prove authorization bypass. Runtime exposure,
 exploitability, deployment, middleware registration, server configuration, and
 independent authorization remain unknown. The pinned Livewire
