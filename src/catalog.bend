@@ -6,6 +6,47 @@ type AffectedRange is Data:
 type Advisory is Data:
   Advisory{ghsa: String, cve: String, profile: String, ranges: List<&2, AffectedRange>, sources: List<&2, String>, functions: List<&2, String>}
 
+def lower.eq(x: Maybe<&2, String>, y: Maybe<&2, String>) -> Bool:
+  match x y:
+    case None{} None{}:
+      True{}
+    case Some{xs} Some{ys}:
+      String.eq(xs, ys)
+    case a b:
+      False{}
+
+def strings.eq(xs: List<&2, String>, ys: List<&2, String>) -> Bool:
+  match xs ys:
+    case Nil{} Nil{}:
+      True{}
+    case Con{x, xr} Con{y, yr}:
+      String.eq(x, y) && strings.eq(xr, yr)
+    case a b:
+      False{}
+
+def range.eq(x: AffectedRange, y: AffectedRange) -> Bool:
+  match x y:
+    case AffectedRange{pk1, l1, u1, f1, v1} AffectedRange{pk2, l2, u2, f2, v2}:
+      String.eq(pk1, pk2) && lower.eq(l1, l2) && String.eq(u1, u2) && String.eq(f1, f2) && String.eq(v1, v2)
+    case a b:
+      False{}
+
+def ranges.eq(xs: List<&2, AffectedRange>, ys: List<&2, AffectedRange>) -> Bool:
+  match xs ys:
+    case Nil{} Nil{}:
+      True{}
+    case Con{x, xr} Con{y, yr}:
+      range.eq(x, y) && ranges.eq(xr, yr)
+    case a b:
+      False{}
+
+def advisory.eq(x: Advisory, y: Advisory) -> Bool:
+  match x y:
+    case Advisory{g1, c1, p1, r1, s1, f1} Advisory{g2, c2, p2, r2, s2, f2}:
+      String.eq(g1, g2) && String.eq(c1, c2) && String.eq(p1, p2) && ranges.eq(r1, r2) && strings.eq(s1, s2) && strings.eq(f1, f2)
+    case a b:
+      False{}
+
 def snapshot_date() -> String:
   "2026-10-26"
 

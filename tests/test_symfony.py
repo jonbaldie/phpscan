@@ -353,6 +353,59 @@ class SymfonyTests(unittest.TestCase):
         results = json.loads(result.stdout)['runs'][0]['results']
         self.assertEqual([r['properties']['affectedCode'] for r in results], ['unknown', 'possible'])
 
+    def test_ignore_on_authorization_line_suppresses(self):
+        self.inventory()
+        self.source.write_text(SOURCE.replace(
+            'abort_unless(auth()->check(), 403);', 'abort_unless(auth()->check(), 403); // phpscan-ignore'))
+        result = self.scan('sarif')
+        self.assertEqual(result.returncode, 1, result.stderr)
+        finding, = json.loads(result.stdout)['runs'][0]['results']
+        self.assertEqual(finding['ruleId'], GHSA)
+        self.assertEqual(finding['properties']['affectedCode'], 'unknown')
+        self.assertEqual(finding['properties']['sourceEvidence'], [])
+
+    def test_ignore_on_method_line_suppresses(self):
+        self.inventory()
+        fixture = SOURCE.replace(
+            "        if (str_starts_with($request->getPathInfo(), '/admin')) {",
+            "        if (str_starts_with(\n                $request->getPathInfo() /* phpscan-ignore */,\n                '/admin')) {")
+        self.assertNotEqual(fixture, SOURCE)
+        self.source.write_text(fixture)
+        result = self.scan('sarif')
+        self.assertEqual(result.returncode, 1, result.stderr)
+        finding, = json.loads(result.stdout)['runs'][0]['results']
+        self.assertEqual(finding['ruleId'], GHSA)
+        self.assertEqual(finding['properties']['affectedCode'], 'unknown')
+        self.assertEqual(finding['properties']['sourceEvidence'], [])
+
+    MULTILINE_SOURCE = SOURCE.replace(
+        "        if (str_starts_with($request->getPathInfo(), '/admin')) {",
+        "        if (str_starts_with(\n                $request->getPathInfo(),\n                '/admin')) {")
+
+    def test_multiline_reports_possible_without_ignore(self):
+        self.inventory()
+        fixture = self.MULTILINE_SOURCE
+        self.assertNotEqual(fixture, SOURCE)
+        self.source.write_text(fixture)
+        result = self.scan('sarif')
+        self.assertEqual(result.returncode, 1, result.stderr)
+        finding, = json.loads(result.stdout)['runs'][0]['results']
+        self.assertEqual(finding['ruleId'], GHSA)
+        self.assertEqual(finding['properties']['affectedCode'], 'possible')
+
+    def test_ignore_on_check_line_multiline_suppresses(self):
+        self.inventory()
+        fixture = self.MULTILINE_SOURCE.replace(
+            'if (str_starts_with(', 'if (str_starts_with( // phpscan-ignore')
+        self.assertNotEqual(fixture, self.MULTILINE_SOURCE)
+        self.source.write_text(fixture)
+        result = self.scan('sarif')
+        self.assertEqual(result.returncode, 1, result.stderr)
+        finding, = json.loads(result.stdout)['runs'][0]['results']
+        self.assertEqual(finding['ruleId'], GHSA)
+        self.assertEqual(finding['properties']['affectedCode'], 'unknown')
+        self.assertEqual(finding['properties']['sourceEvidence'], [])
+
     def test_suppression_removes_code_evidence_not_dependency_match(self):
         self.inventory()
         for source in [SOURCE.replace('        if (', '        // phpscan-ignore\n        if ('),

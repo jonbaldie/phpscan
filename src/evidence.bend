@@ -104,19 +104,19 @@ def ignored(xs: List<&2, U32>, +line: U32) -> Bool:
     case Con{x, rest}:
       U32.is_eq(x, line) || ignored(rest, line)
 
-def line(s: Site) -> U32:
+def site_ignored(+lines: List<&2, U32>, +s: Site) -> Bool:
   match s:
-    case Site{p, method, c, a, t, s}:
-      method
-    case Observation{p, l, k, s, d}:
-      l
+    case Site{p, method, c, a, t, u}:
+      ignored(lines, method) || ignored(lines, c) || ignored(lines, a)
+    case Observation{p, l, k, st, d}:
+      ignored(lines, l)
 
 def visible(sites: List<&2, Site>, +lines: List<&2, U32>) -> List<&2, Site>:
   match sites:
     case Nil{}:
       []
     case Con{+site, +rest}:
-      L.sel(List<&2, Site>, ignored(lines, line(site)), u => visible(rest, lines), u => Con{site, visible(rest, lines)})
+      L.sel(List<&2, Site>, site_ignored(lines, site), u => visible(rest, lines), u => Con{site, visible(rest, lines)})
 
 def suppress(e: Evidence, lines: List<&2, U32>) -> Evidence:
   match e:
