@@ -43,7 +43,7 @@ url = next(a for a in args if a.startswith('https://'))
 base = 'https://github.com/jonbaldie/phpscan/releases/'
 assert url.startswith(base), url
 suffix = url[len(base):]
-assert suffix.startswith(('download/v0.1.0/', 'latest/download/')), suffix
+assert suffix.startswith(('download/v0.2.0/', 'latest/download/')), suffix
 assert '--proto' in args and '=https' in args
 name = url.rsplit('/', 1)[-1]
 shutil.copyfile(pathlib.Path(os.environ['TEST_TRANSPORT']) / name, args[args.index('-o') + 1])
@@ -67,18 +67,18 @@ shutil.copyfile(pathlib.Path(os.environ['TEST_TRANSPORT']) / name, args[args.ind
         self.assertEqual(list(self.dest.glob('.phpscan.*')), [])
 
     def test_pinned_install_and_actual_scan(self):
-        result = self.install('v0.1.0')
+        result = self.install('v0.2.0')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertTrue(os.access(self.target, os.X_OK))
         version = subprocess.run([self.target, '--version'], capture_output=True, text=True, timeout=30)
         self.assertEqual(version.returncode, 0)
-        self.assertEqual(version.stdout, 'phpscan 0.1.0\n')
+        self.assertEqual(version.stdout, 'phpscan 0.2.0\n')
         php = self.root / 'unsafe.php'
         php.write_text("<?php echo $_GET['x'];")
         scan = subprocess.run([self.target, php], capture_output=True, text=True, timeout=30)
         self.assertEqual(scan.returncode, 1)
         self.assertIn(':1: [PHP-XSS]', scan.stdout)
-        again = self.install('v0.1.0')
+        again = self.install('v0.2.0')
         self.assertEqual(again.returncode, 0, again.stderr)
         self.assertEqual(hashlib.sha256(self.target.read_bytes()).digest(), hashlib.sha256(BINARY.read_bytes()).digest())
 
@@ -90,7 +90,7 @@ shutil.copyfile(pathlib.Path(os.environ['TEST_TRANSPORT']) / name, args[args.ind
     def test_corruption_preserves_existing_binary(self):
         with self.archive.open('ab') as archive:
             archive.write(b'corrupt')
-        result = self.install('v0.1.0')
+        result = self.install('v0.2.0')
         self.assert_preserved(result)
         self.assertIn('Checksum mismatch', result.stderr)
 
@@ -99,7 +99,7 @@ shutil.copyfile(pathlib.Path(os.environ['TEST_TRANSPORT']) / name, args[args.ind
         self.target.mkdir()
         marker = self.target / 'keep'
         marker.write_text('existing directory\n')
-        result = self.install('v0.1.0')
+        result = self.install('v0.2.0')
         self.assertNotEqual(result.returncode, 0, result.stdout)
         self.assertIn('is a directory', result.stderr)
         self.assertEqual(marker.read_text(), 'existing directory\n')
@@ -111,14 +111,14 @@ shutil.copyfile(pathlib.Path(os.environ['TEST_TRANSPORT']) / name, args[args.ind
         for contents in ['', valid + valid]:
             with self.subTest(contents=contents):
                 self.manifest.write_text(contents)
-                self.assert_preserved(self.install('v0.1.0'))
+                self.assert_preserved(self.install('v0.2.0'))
 
     def test_download_failure(self):
         self.archive.unlink()
-        self.assert_preserved(self.install('v0.1.0'))
+        self.assert_preserved(self.install('v0.2.0'))
 
     def test_invalid_version(self):
-        for version in ['../main', '--unknown', '0.1.0']:
+        for version in ['../main', '--unknown', '0.2.0']:
             with self.subTest(version=version):
                 self.assert_preserved(self.install(version))
 
@@ -126,7 +126,7 @@ shutil.copyfile(pathlib.Path(os.environ['TEST_TRANSPORT']) / name, args[args.ind
         uname = self.tools / 'uname'
         uname.write_text('#!/bin/sh\nprintf "FreeBSD\\n"\n')
         uname.chmod(0o755)
-        result = self.install('v0.1.0')
+        result = self.install('v0.2.0')
         self.assert_preserved(result)
         self.assertIn('Supported operating systems', result.stderr)
 
@@ -136,7 +136,7 @@ shutil.copyfile(pathlib.Path(os.environ['TEST_TRANSPORT']) / name, args[args.ind
             item.size = 1
             archive.addfile(item, io.BytesIO(b'x'))
         self.write_manifest()
-        self.assert_preserved(self.install('v0.1.0'))
+        self.assert_preserved(self.install('v0.2.0'))
 
     def test_wrong_binary_version(self):
         other = self.root / 'other'
@@ -145,7 +145,7 @@ shutil.copyfile(pathlib.Path(os.environ['TEST_TRANSPORT']) / name, args[args.ind
         with tarfile.open(self.archive, 'w:gz') as archive:
             archive.add(other, arcname='phpscan')
         self.write_manifest()
-        result = self.install('v0.1.0')
+        result = self.install('v0.2.0')
         self.assert_preserved(result)
         self.assertIn('does not match', result.stderr)
 
