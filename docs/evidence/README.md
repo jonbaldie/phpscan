@@ -42,3 +42,6 @@ is the destination for published asset checksums, the tag-workflow result, and
 actual public-install results. Those outcomes are recorded in the release notes
 after publication, without creating a new unreleased source commit. Local
 compilation and pre-publication CI do not prove that a public release exists.
+
+The [v0.2.0 release record](https://github.com/jonbaldie/phpscan/releases/tag/v0.2.0)
+contains its published verification results.

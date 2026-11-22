@@ -5,8 +5,8 @@
 Use the pinned installer on any supported Linux or macOS runner:
 
 ```sh
-curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/jonbaldie/phpscan/v0.1.0/install.sh -o install-phpscan.sh
-PHPSCAN_INSTALL_DIR="$PWD/.phpscan-bin" sh install-phpscan.sh v0.1.0
+curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/jonbaldie/phpscan/v0.2.0/install.sh -o install-phpscan.sh
+PHPSCAN_INSTALL_DIR="$PWD/.phpscan-bin" sh install-phpscan.sh v0.2.0
 ./.phpscan-bin/phpscan src/
 ```
 
@@ -37,8 +37,8 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Install phpscan
         run: |
-          curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/jonbaldie/phpscan/v0.1.0/install.sh -o "$RUNNER_TEMP/install-phpscan.sh"
-          PHPSCAN_INSTALL_DIR="$RUNNER_TEMP/phpscan-bin" sh "$RUNNER_TEMP/install-phpscan.sh" v0.1.0
+          curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/jonbaldie/phpscan/v0.2.0/install.sh -o "$RUNNER_TEMP/install-phpscan.sh"
+          PHPSCAN_INSTALL_DIR="$RUNNER_TEMP/phpscan-bin" sh "$RUNNER_TEMP/install-phpscan.sh" v0.2.0
           echo "$RUNNER_TEMP/phpscan-bin" >> "$GITHUB_PATH"
       - name: Scan PHP
         id: scan

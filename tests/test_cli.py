@@ -26,7 +26,7 @@ class CliTests(unittest.TestCase):
     def test_version(self):
         result = self.run_cli('--version')
         self.assertEqual(result.returncode, 0)
-        self.assertEqual(result.stdout, 'phpscan 0.1.0\n')
+        self.assertEqual(result.stdout, 'phpscan 0.2.0\n')
         self.assertEqual(result.stderr, '')
 
     def test_help(self):
@@ -220,7 +220,7 @@ class PrefixAccess
         document = json.loads(result.stdout)
         self.assertEqual(document['version'], '2.1.0')
         run = document['runs'][0]
-        self.assertEqual(run['tool']['driver']['version'], '0.1.0')
+        self.assertEqual(run['tool']['driver']['version'], '0.2.0')
         self.assertEqual(len(run['results']), 1)
         finding = run['results'][0]
         self.assertEqual(finding['ruleId'], 'PHP-XSS')

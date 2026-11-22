@@ -1,4 +1,4 @@
 import Base
 
 def value() -> String:
-  "0.1.0"
+  "0.2.0"
