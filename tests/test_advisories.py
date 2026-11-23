@@ -112,6 +112,24 @@ Route::get('/example', Example::class);
         self.assertIn(f'livewire-mitigation mitigation at {component}:7', result.stdout)
         self.assertIn(f'livewire-route possible at {route}:3', result.stdout)
 
+    def test_livewire_deferred_closure_is_not_mitigation(self):
+        self.inventory('4.4.7')
+        (self.root / 'component.php').write_text(r'''<?php
+use Livewire\Component;
+use Livewire\Attributes\Authorize;
+use Livewire\Attributes\Json;
+class Example extends Component {
+    #[Authorize('delete'), Json] public function update() {
+        $check = function () { $this->authorize('delete'); };
+        $alsoCheck = fn () => $this->authorize('delete');
+    }
+}
+''')
+        result = self.scan()
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn('livewire-method possible', result.stdout)
+        self.assertNotIn('livewire-mitigation mitigation', result.stdout)
+
     def test_livewire_attributes_on_different_methods_are_unknown(self):
         self.inventory('4.4.7')
         (self.root / 'component.php').write_text('''<?php
@@ -156,7 +174,10 @@ class Example extends Component {
 }
 '''
         (self.root / 'one.php').write_text(component)
-        (self.root / 'two.php').write_text(component)
+        (self.root / 'two.php').write_text('''<?php
+namespace App;
+class Example implements SomeInterface {}
+''')
         route = self.root / 'routes.php'
         route.write_text('''<?php
 use App\\Example;

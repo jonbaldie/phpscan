@@ -48,6 +48,37 @@ def merge_mitigation(first: Mitigation, second: Mitigation) -> Mitigation:
       Mitigation{next, E.completion_merge(a, b)}
 
 
+type Skipped is Data:
+  Skipped{rest: List<&2, T.Node>, completion: E.Completion}
+
+def skip_callable(fuel: Nat, ns: List<&2, T.Node>) -> Skipped:
+  match fuel ns:
+    case _ Nil{}:
+      Skipped{[], E.Finished{}}
+    case 0n _:
+      Skipped{[], E.Exhausted{}}
+    case 1n+(+p) Con{T.Grp{123, l, body}, rest}:
+      Skipped{rest, E.Finished{}}
+    case 1n+(+p) Con{T.Leaf{L.Tok{5, ";", l}}, rest}:
+      Skipped{rest, E.Finished{}}
+    case 1n+(+p) Con{node, rest}:
+      skip_callable(p, rest)
+
+def skipped_rest(skipped: Skipped) -> List<&2, T.Node>:
+  match skipped:
+    case Skipped{rest, done}:
+      rest
+
+def skipped_completion(skipped: Skipped) -> E.Completion:
+  match skipped:
+    case Skipped{rest, done}:
+      done
+
+def mitigation_completion(result: Mitigation, done: E.Completion) -> Mitigation:
+  match result:
+    case Mitigation{line, prior}:
+      Mitigation{line, E.completion_merge(prior, done)}
+
 def mitigation(fuel: Nat, ns: List<&2, T.Node>, +lines: List<&2, U32>) -> Mitigation:
   match fuel ns:
     case _ Nil{}:
@@ -56,6 +87,12 @@ def mitigation(fuel: Nat, ns: List<&2, T.Node>, +lines: List<&2, U32>) -> Mitiga
       Mitigation{None{}, E.Exhausted{}}
     case 1n+(+p) Con{T.Leaf{L.Tok{0, "this", +line}}, Con{T.Leaf{L.Tok{5, "->", a}}, Con{T.Leaf{L.Tok{1, "authorize", b}}, Con{T.Grp{40, c, args}, rest}}}}:
       L.sel(Mitigation, E.ignored(lines, line), u => mitigation(p, rest, lines), u => Mitigation{Some{line}, E.Finished{}})
+    case 1n+(+p) Con{T.Leaf{L.Tok{1, "function", l}}, rest}:
+      +skipped = skip_callable(p, rest)
+      mitigation_completion(mitigation(p, skipped_rest(skipped), lines), skipped_completion(skipped))
+    case 1n+(+p) Con{T.Leaf{L.Tok{1, "fn", l}}, rest}:
+      +skipped = skip_callable(p, rest)
+      mitigation_completion(mitigation(p, skipped_rest(skipped), lines), skipped_completion(skipped))
     case 1n+(+p) Con{T.Grp{kind, l, body}, rest}:
       merge_mitigation(mitigation(p, body, lines), mitigation(p, rest, lines))
     case 1n+(+p) Con{n, rest}:
@@ -122,11 +159,6 @@ def methods(fuel: Nat, ns: List<&2, T.Node>, +scope: J.Scope, +path: String, +li
     case 1n+(+p) Con{n, rest}:
       methods(p, rest, scope, path, lines, auth, json)
 
-def add_component(result: Collected, component: Component) -> Collected:
-  match result:
-    case Collected{cs, done}:
-      Collected{Con{component, cs}, done}
-
 type ClassTail is Data:
   ClassTail{nodes: List<&2, T.Node>, completion: E.Completion}
 
@@ -173,8 +205,9 @@ def classes(fuel: Nat, +allowance: Nat, ns: List<&2, T.Node>, +scope: J.Scope, +
     case 1n+(+p) Con{T.Leaf{L.Tok{1, "class", +line}}, Con{T.Leaf{L.Tok{1, +name, n}}, Con{T.Leaf{L.Tok{1, "extends", e}}, Con{T.Leaf{L.Tok{1, base, b}}, rest}}}} J.Scope{+namespace, +im}:
       +tail = class_tail(p, rest)
       finish_class(tail_methods(tail, allowance, J.Scope{namespace, im}, path, lines, String.eq(J.resolve(base, J.Scope{namespace, im}), "livewire\\component") && Bool.not(E.ignored(lines, line))), classes(p, allowance, tail_rest(tail), J.Scope{namespace, im}, path, lines), J.join(namespace, name))
-    case 1n+(+p) Con{T.Leaf{L.Tok{1, "class", l}}, Con{T.Leaf{L.Tok{1, name, n}}, Con{T.Grp{123, c, body}, rest}}} J.Scope{+namespace, im}:
-      add_component(classes(p, allowance, rest, J.Scope{namespace, im}, path, lines), Component{J.join(namespace, name), []})
+    case 1n+(+p) Con{T.Leaf{L.Tok{1, "class", l}}, Con{T.Leaf{L.Tok{1, name, n}}, rest}} J.Scope{+namespace, im}:
+      +tail = class_tail(p, rest)
+      finish_class(tail_methods(tail, allowance, J.Scope{namespace, im}, path, lines, False{}), classes(p, allowance, tail_rest(tail), J.Scope{namespace, im}, path, lines), J.join(namespace, name))
     case 1n+(+p) Con{node, rest} _:
       classes(p, allowance, rest, scope, path, lines)
 
