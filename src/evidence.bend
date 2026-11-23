@@ -11,10 +11,14 @@ type ObservationKind is Data:
   JsonApiResource{}
   JsonApiRelationships{}
   JsonApiEndpoint{}
+  LivewireMethod{}
+  LivewireRoute{}
+  LivewireMitigation{}
 
 type ObservationStatus is Data:
   Possible{}
   Unknown{}
+  Mitigation{}
 
 type Site is Data:
   Site{path: String, methodLine: U32, checkLine: U32, authorizationLine: U32, receiverType: String, prefix: String}
@@ -42,6 +46,12 @@ def kind(k: ObservationKind) -> String:
       "jsonapi-relationships"
     case JsonApiEndpoint{}:
       "jsonapi-endpoint"
+    case LivewireMethod{}:
+      "livewire-method"
+    case LivewireRoute{}:
+      "livewire-route"
+    case LivewireMitigation{}:
+      "livewire-mitigation"
 
 def profile(k: ObservationKind) -> String:
   match k:
@@ -57,6 +67,12 @@ def profile(k: ObservationKind) -> String:
       "laravel-jsonapi"
     case JsonApiEndpoint{}:
       "laravel-jsonapi"
+    case LivewireMethod{}:
+      "livewire-json-authorize"
+    case LivewireRoute{}:
+      "livewire-json-authorize"
+    case LivewireMitigation{}:
+      "livewire-json-authorize"
 
 def status(s: ObservationStatus) -> String:
   match s:
@@ -64,6 +80,8 @@ def status(s: ObservationStatus) -> String:
       "possible"
     case Unknown{}:
       "unknown"
+    case Mitigation{}:
+      "mitigation"
 
 def completion_merge(a: Completion, b: Completion) -> Completion:
   match a b:
@@ -145,4 +163,6 @@ def possible(sites: List<&2, Site>) -> Bool:
     case Con{Observation{p, l, k, Possible{}, d}, rest}:
       True{}
     case Con{Observation{p, l, k, Unknown{}, d}, rest}:
+      possible(rest)
+    case Con{Observation{p, l, k, Mitigation{}, d}, rest}:
       possible(rest)

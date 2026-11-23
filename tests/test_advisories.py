@@ -31,6 +31,137 @@ class AdvisoryTests(unittest.TestCase):
         return subprocess.run([str(BINARY), '--format=' + fmt, str(path or self.root)],
                               capture_output=True, text=True, timeout=60)
 
+    def test_livewire_json_authorization_version_match_without_cve(self):
+        self.inventory('v4.4.7')
+        result = self.scan(path=self.lock)
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn('GHSA-mhf7-xp6r-6qrc', result.stdout)
+        self.assertNotIn('CVE-', result.stdout)
+        self.assertIn('affected-code evidence unknown', result.stdout)
+
+    def test_livewire_json_authorization_version_boundaries(self):
+        for version, expected in [('4.2.99', False), ('4.3.0', True),
+                                  ('4.4.7', True), ('4.4.8', False), ('3.6.4', False)]:
+            with self.subTest(version=version):
+                self.inventory(version)
+                result = self.scan(path=self.lock)
+                self.assertEqual(result.returncode, 1 if expected else 0, result.stderr)
+                self.assertEqual('GHSA-mhf7-xp6r-6qrc' in result.stdout, expected)
+
+    def test_livewire_json_method_and_route_evidence(self):
+        self.inventory('v4.4.7')
+        component = self.root / 'component.php'
+        component.write_text('''<?php
+namespace App\\Livewire;
+use Livewire\\Component;
+use Livewire\\Attributes\\Authorize as Permit;
+use Livewire\\Attributes\\Json as Api;
+class CommentEditor extends Component {
+    #[Permit('delete', 'comment')]
+    #[Api]
+    public function deleteComment() { $this->authorize('delete'); }
+}
+''')
+        route = self.root / 'routes.php'
+        route.write_text('''<?php
+use App\\Livewire\\CommentEditor;
+use Illuminate\\Support\\Facades\\Route;
+Route::get('/comments', CommentEditor::class);
+''')
+        for fmt in ('text', 'github', 'sarif'):
+            with self.subTest(fmt=fmt):
+                result = self.scan(fmt)
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertEqual(result.stdout, self.scan(fmt).stdout)
+                self.assertIn('GHSA-mhf7-xp6r-6qrc', result.stdout)
+                self.assertIn(str(self.lock), result.stdout)
+                self.assertIn(str(component), result.stdout)
+                self.assertIn(str(route), result.stdout)
+                self.assertIn('mitigation', result.stdout)
+                if fmt == 'text':
+                    self.assertIn(f'{component}:9', result.stdout)
+                    self.assertIn(f'{route}:4', result.stdout)
+                if fmt == 'sarif':
+                    finding, = json.loads(result.stdout)['runs'][0]['results']
+                    self.assertNotIn('cve', finding['properties'])
+                    self.assertEqual(finding['properties']['runtimeExposure'], 'unknown')
+                    self.assertEqual([(x['kind'], x['line'], x['status']) for x in finding['properties']['sourceEvidence']],
+                                     [('livewire-method', 9, 'possible'), ('livewire-mitigation', 9, 'mitigation'), ('livewire-route', 4, 'possible')])
+
+    def test_livewire_attributes_on_different_methods_are_unknown(self):
+        self.inventory('4.4.7')
+        (self.root / 'component.php').write_text('''<?php
+use Livewire\\Component;
+use Livewire\\Attributes\\Authorize;
+use Livewire\\Attributes\\Json;
+class Example extends Component {
+    #[Authorize('delete')] public function one() {}
+    #[Json] public function two() {}
+}
+''')
+        result = self.scan()
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn('affected-code evidence unknown', result.stdout)
+        self.assertNotIn('livewire-method possible', result.stdout)
+
+    def test_livewire_attributes_in_one_group(self):
+        self.inventory('4.4.7')
+        component = self.root / 'component.php'
+        component.write_text('''<?php
+use Livewire\\Component;
+use Livewire\\Attributes\\Authorize;
+use Livewire\\Attributes\\Json;
+class Example extends Component {
+    #[Authorize('delete'), Json] public function update() {}
+}
+''')
+        result = self.scan()
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn(f'livewire-method possible at {component}:6', result.stdout)
+        self.assertIn('mounting and runtime authorization unknown', result.stdout)
+
+    def test_livewire_ambiguous_component_route_is_unknown(self):
+        self.inventory('4.4.7')
+        component = '''<?php
+namespace App;
+use Livewire\\Component;
+use Livewire\\Attributes\\Authorize;
+use Livewire\\Attributes\\Json;
+class Example extends Component {
+    #[Authorize('delete'), Json] public function update() {}
+}
+'''
+        (self.root / 'one.php').write_text(component)
+        (self.root / 'two.php').write_text(component)
+        route = self.root / 'routes.php'
+        route.write_text('''<?php
+use App\\Example;
+use Illuminate\\Support\\Facades\\Route;
+Route::get('/example', Example::class);
+''')
+        result = self.scan()
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertNotIn(f'livewire-route possible at {route}', result.stdout)
+
+    def test_livewire_conditional_route_is_unknown(self):
+        self.inventory('4.4.7')
+        (self.root / 'component.php').write_text('''<?php
+use Livewire\\Component;
+use Livewire\\Attributes\\Authorize;
+use Livewire\\Attributes\\Json;
+class Example extends Component {
+    #[Authorize('delete'), Json] public function update() {}
+}
+''')
+        route = self.root / 'routes.php'
+        route.write_text('''<?php
+use Illuminate\\Support\\Facades\\Route;
+if ($enabled) Route::get('/example', Example::class);
+''')
+        result = self.scan()
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertNotIn(f'livewire-route possible at {route}', result.stdout)
+
     def test_exact_boundaries_and_prerelease_order(self):
         for version, status in [
             ('3.0.0-beta.0', 0), ('3.0.0-beta.1', 1), ('3.0.0-beta.2', 1),

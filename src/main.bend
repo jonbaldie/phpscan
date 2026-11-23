@@ -8,6 +8,7 @@ import ./symfony.bend as P
 import ./evidence.bend as E
 import ./laravel.bend as G
 import ./jsonapi.bend as J
+import ./livewire.bend as W
 
 # phpscan: taint-tracking vulnerability scanner for PHP sources, for CI.
 #
@@ -246,10 +247,13 @@ def advisory.related(f: A.Finding) -> String:
     case _:
       ""
 
+def advisory.cve(+cve: String) -> String:
+  L.sel(String, String.is_empty(cve), u => "", u => ",\"cve\":" ++ json.str(cve))
+
 def advisory.props(f: A.Finding) -> String:
   match f:
     case A.Match{n, C.Advisory{id, cve, profile, ranges, sources, functions}, C.AffectedRange{package, lower, upper, fixed, provenance}, version, group, +sites}:
-      "{\"evidenceKind\":\"dependency-version\",\"ghsa\":" ++ json.str(id) ++ ",\"cve\":" ++ json.str(cve) ++
+      "{\"evidenceKind\":\"dependency-version\",\"ghsa\":" ++ json.str(id) ++ advisory.cve(cve) ++
       ",\"package\":" ++ json.str(package) ++ ",\"installedVersion\":" ++ json.str(version) ++
       ",\"dependencyGroup\":" ++ json.str(group) ++ ",\"affectedRange\":" ++ json.str(A.range_text(lower, upper)) ++
       ",\"fixedVersion\":" ++ json.str(fixed) ++ ",\"affectedCode\":" ++ json.str(L.sel(String, E.possible(sites), u => "possible", u => "unknown")) ++
@@ -266,10 +270,10 @@ def source.notices(sites: List<&2, E.Site>, +id: String, +cve: String) -> String
       ""
     case Con{E.Site{path, method, check, auth, typ, prefix}, rest}:
       "::notice file=" ++ gh.escape(path) ++ ",line=" ++ U32.show(method) ++ ",title=phpscan " ++ id ++
-      "::" ++ cve ++ " / " ++ id ++ "; possible path-prefix access check; runtime exposure unknown; exploitability unknown\n" ++ source.notices(rest, id, cve)
+      "::" ++ A.identifiers(id, cve) ++ "; possible path-prefix access check; runtime exposure unknown; exploitability unknown\n" ++ source.notices(rest, id, cve)
     case Con{E.Observation{path, line, kind, status, detail}, rest}:
       "::notice file=" ++ gh.escape(path) ++ ",line=" ++ U32.show(line) ++ ",title=phpscan " ++ id ++ "::" ++
-      gh.escape(cve ++ " / " ++ id ++ "; " ++ E.kind(kind) ++ " " ++ E.status(status) ++ "; " ++ detail ++
+      gh.escape(A.identifiers(id, cve) ++ "; " ++ E.kind(kind) ++ " " ++ E.status(status) ++ "; " ++ detail ++
         "; runtime exposure unknown; exploitability unknown") ++ "\n" ++ source.notices(rest, id, cve)
 
 def advisory.notices(f: A.Finding) -> String:
@@ -297,12 +301,15 @@ def advisory.fs(fs: List<&2, A.Finding>, +fmt: Format, +path: String) -> List<&2
     case Con{f, rest}:
       Con{advisory.one(fmt, path, f), advisory.fs(rest, fmt, path)}
 
+def advisory.description(+id: String, +cve: String) -> String:
+  L.sel(String, String.is_empty(cve), u => id, u => cve)
+
 def advisory.rules(rs: List<&2, C.Advisory>) -> List<&2, String>:
   match rs:
     case Nil{}:
       ["{\"id\":\"PHP-ADVISORY-INCOMPLETE\",\"shortDescription\":{\"text\":\"Dependency advisory analysis unknown\"}}"]
-    case Con{C.Advisory{id, cve, profile, ranges, sources, functions}, rest}:
-      Con{"{\"id\":" ++ json.str(id) ++ ",\"shortDescription\":{\"text\":" ++ json.str(cve) ++ "}}", advisory.rules(rest)}
+    case Con{C.Advisory{+id, cve, profile, ranges, sources, functions}, rest}:
+      Con{"{\"id\":" ++ json.str(id) ++ ",\"shortDescription\":{\"text\":" ++ json.str(advisory.description(id, cve)) ++ "}}", advisory.rules(rest)}
 
 def fmt.reps(rs: List<&2, Rep>, +fmt: Format) -> List<&2, String>:
   match rs:
@@ -441,8 +448,8 @@ def project.needs_profile(rs: List<&2, Rep>, +profile: String) -> Bool:
 
 def project.evidence(root: String, +xs: List<&2, E.Src>, +rs: List<&2, Rep>) -> E.Evidence:
   a b = L.sel(E.Evidence, project.needs_profile(rs, "symfony-path-prefix"), u => project.symfony(xs), u => E.Complete{[]}) L.sel(E.Evidence, project.needs_profile(rs, "laravel-token-guard"), u => G.analyze(root, xs), u => E.Complete{[]})
-  c = L.sel(E.Evidence, project.needs_profile(rs, "laravel-jsonapi"), u => J.scan(xs), u => E.Complete{[]})
-  E.merge(E.merge(a, b), c)
+  c d = L.sel(E.Evidence, project.needs_profile(rs, "laravel-jsonapi"), u => J.scan(xs), u => E.Complete{[]}) L.sel(E.Evidence, project.needs_profile(rs, "livewire-json-authorize"), u => W.scan(xs), u => E.Complete{[]})
+  E.merge(E.merge(a, b), E.merge(c, d))
 
 def project.enrich(rs: List<&2, Rep>, +e: E.Evidence) -> List<&2, Rep>:
   match rs:
