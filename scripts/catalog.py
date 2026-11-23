@@ -14,7 +14,8 @@ def render():
         assert item['ghsa'] not in seen, 'duplicate GHSA'
         seen.add(item['ghsa'])
         assert item['source_profile'] in {
-            'none', 'symfony-path-prefix', 'laravel-token-guard', 'laravel-jsonapi'}
+            'none', 'symfony-path-prefix', 'laravel-token-guard', 'laravel-jsonapi',
+            'livewire-json-authorize'}
         ranges = []
         for affected in item['affected_ranges']:
             assert affected['upper_exclusive'] == affected['fixed']
@@ -28,8 +29,10 @@ def render():
                 fields.append(json.dumps(affected[key]))
             ranges.append('AffectedRange{' + ', '.join(fields) + '}')
         assert ranges
-        strings = [item[key] for key in ['ghsa', 'cve', 'source_profile']]
-        assert all(isinstance(value, str) and value for value in strings)
+        cve = item.get('cve')
+        assert cve is None or (isinstance(cve, str) and cve)
+        strings = [item['ghsa'], cve or '', item['source_profile']]
+        assert all(isinstance(value, str) and value for value in (strings[0], strings[2]))
         assert item['sources'] and all(url.startswith('https://') for url in item['sources'])
         assert isinstance(item['vulnerable_functions'], list)
         assert all(isinstance(name, str) and name for name in item['vulnerable_functions'])

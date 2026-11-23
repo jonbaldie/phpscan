@@ -59,6 +59,8 @@ The catalog covers `livewire/livewire` CVE-2025-54068,
 GHSA-29cq-5w36-x7w3, in `>=3.0.0-beta.1,<3.6.4`. Version 3.6.3 is affected.
 Version 3.6.4 is the first fix. The catalog records the discrepancy between the
 maintainer's structured range and prose and the reviewed Composer boundary.
+It also covers GHSA-mhf7-xp6r-6qrc for `livewire/livewire` in
+`>=4.3.0,<4.4.8`, fixed in 4.4.8. No CVE is assigned in the pinned record.
 It also covers CVE-2025-64500 / GHSA-3rg7-wf37-54rm for
 `symfony/http-foundation` in `<5.4.50`, `>=6.0.0,<6.4.29`, and
 `>=7.0.0,<7.3.7`. The distinct `symfony/symfony` record starts its first
@@ -193,6 +195,17 @@ exploitability, deployment, middleware registration, server configuration, and
 independent authorization remain unknown. The pinned Livewire
 record has no affected-function metadata. The scanner does not infer
 reachability from that absence and does not execute application code.
+
+For GHSA-mhf7-xp6r-6qrc, the bounded Livewire profile recognizes direct
+subclasses of `Livewire\Component` with both `Livewire\Attributes\Authorize`
+and `Livewire\Attributes\Json` on the same method. Simple imports and aliases
+are resolved. A standalone literal `Route::get` mounting a uniquely identified
+component provides possible route evidence; unresolved mounting remains unknown.
+A direct in-method `$this->authorize(...)` is mitigation evidence, but its
+outcome remains unknown and it does not remove the version match. This profile does not cover
+the advisory's reordered-parameter action or event-listener variants, indirect
+inheritance, dynamic routes, or general policy correctness. Runtime
+registration, actual authorization, and exploitability remain unknown.
 
 The bounded `laravel-jsonapi` profile identifies direct subclasses of
 `Illuminate\Http\Resources\JsonApi\JsonApiResource` through simple explicit

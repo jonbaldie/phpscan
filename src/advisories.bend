@@ -51,10 +51,13 @@ def site_text(sites: List<&2, E.Site>) -> String:
 def code_text(+sites: List<&2, E.Site>) -> String:
   L.sel(String, E.possible(sites), u => site_text(sites), u => "; affected-code evidence unknown" ++ site_text(sites))
 
+def identifiers(+id: String, +cve: String) -> String:
+  L.sel(String, String.is_empty(cve), u => id, u => cve ++ " / " ++ id)
+
 def message(f: Finding) -> String:
   match f:
     case Match{n, C.Advisory{id, cve, profile, ranges, sources, functions}, C.AffectedRange{package, lower, upper, fixed, provenance}, v, g, sites}:
-      cve ++ " / " ++ id ++ ": " ++ package ++ " installed " ++ v ++ " (" ++ g ++
+      identifiers(id, cve) ++ ": " ++ package ++ " installed " ++ v ++ " (" ++ g ++
       "); affected " ++ range_text(lower, upper) ++ "; fixed " ++ fixed ++ code_text(sites) ++
       "; runtime exposure unknown; exploitability unknown; deployment unknown; middleware registration unknown; server configuration unknown; independent authorization unknown"
     case Unknown{n, r}:
@@ -121,12 +124,19 @@ def records(rs: List<&2, C.Advisory>, +name: String, +version: String, +n: U32, 
         u => decision(V.read(version), ranges, name, n, a, version, group), u => [])
       List.append(&2, Finding, found, records(rest, name, version, n, group))
 
+def one_version_unknown(fs: List<&2, Finding>) -> List<&2, Finding>:
+  match fs:
+    case Con{Unknown{n, reason}, rest}:
+      [Unknown{n, reason}]
+    case fs:
+      fs
+
 def package(name: Maybe<&2, J.Value>, version: Maybe<&2, J.Value>, group: String) -> List<&2, Finding>:
   match name version:
     case Some{J.Str{nl, +name}} Some{J.Str{+n, +version}}:
       L.sel(List<&2, Finding>, String.is_empty(name) || String.is_empty(version),
         u => [Unknown{n, "empty package name or version"}],
-        u => records(C.records(), name, version, n, group))
+        u => one_version_unknown(records(C.records(), name, version, n, group)))
     case _ _:
       [Unknown{1, "package name and version must be strings in " ++ group}]
 
@@ -163,7 +173,7 @@ def decoded(v: Maybe<&2, J.Value>) -> List<&2, Finding>:
       [Unknown{1, "malformed, unsupported, or over-budget composer.lock JSON; expected an object"}]
 
 def source_profile(+profile: String) -> Bool:
-  String.eq(profile, "symfony-path-prefix") || String.eq(profile, "laravel-token-guard") || String.eq(profile, "laravel-jsonapi")
+  String.eq(profile, "symfony-path-prefix") || String.eq(profile, "laravel-token-guard") || String.eq(profile, "laravel-jsonapi") || String.eq(profile, "livewire-json-authorize")
 
 def needs_profile(fs: List<&2, Finding>, +profile: String) -> Bool:
   match fs:
