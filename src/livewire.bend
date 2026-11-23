@@ -14,58 +14,155 @@ type Component is Data:
 type Collected is Data:
   Collected{components: List<&2, Component>, completion: E.Completion}
 
-def attribute(ns: List<&2, T.Node>, +scope: J.Scope, +target: String) -> Bool:
-  match ns:
-    case Con{T.Leaf{L.Tok{1, name, l}}, rest}:
-      String.eq(J.resolve(name, scope), target) || attribute(rest, scope, target)
-    case Con{node, rest}:
-      attribute(rest, scope, target)
-    case Nil{}:
-      False{}
+type Flag is Data:
+  Flag{value: Bool, completion: E.Completion}
 
-def mitigation(ns: List<&2, T.Node>, +lines: List<&2, U32>) -> Maybe<&2, U32>:
-  match ns:
-    case Nil{}:
-      None{}
-    case Con{T.Leaf{L.Tok{0, "this", +line}}, Con{T.Leaf{L.Tok{5, "->", a}}, Con{T.Leaf{L.Tok{1, "authorize", b}}, Con{T.Grp{40, c, args}, rest}}}}:
-      L.sel(Maybe<&2, U32>, E.ignored(lines, line), u => mitigation(rest, lines), u => Some{line})
-    case Con{n, rest}:
-      mitigation(rest, lines)
+type Mitigation is Data:
+  Mitigation{line: Maybe<&2, U32>, completion: E.Completion}
 
-def method_body(ns: List<&2, T.Node>, lines: List<&2, U32>) -> Maybe<&2, U32>:
-  match ns:
-    case Nil{}:
-      None{}
-    case Con{T.Grp{123, l, body}, rest}:
-      mitigation(body, lines)
-    case Con{T.Leaf{L.Tok{5, ";", l}}, rest}:
-      None{}
-    case Con{n, rest}:
-      method_body(rest, lines)
+type Methods is Data:
+  Methods{items: List<&2, Method>, completion: E.Completion}
 
-def methods(ns: List<&2, T.Node>, +scope: J.Scope, +path: String, +lines: List<&2, U32>, +auth: Bool, +json: Bool) -> List<&2, Method>:
-  match ns:
-    case Nil{}:
-      []
-    case Con{T.Grp{35, +line, +attrs}, rest}:
+def merge_flag(result: Flag, value: Bool) -> Flag:
+  match result:
+    case Flag{found, done}:
+      Flag{value || found, done}
+
+
+def attribute(fuel: Nat, ns: List<&2, T.Node>, +scope: J.Scope, +target: String) -> Flag:
+  match fuel ns:
+    case _ Nil{}:
+      Flag{False{}, E.Finished{}}
+    case 0n _:
+      Flag{False{}, E.Exhausted{}}
+    case 1n+(+p) Con{T.Leaf{L.Tok{1, name, l}}, rest}:
+      merge_flag(attribute(p, rest, scope, target), String.eq(J.resolve(name, scope), target))
+    case 1n+(+p) Con{node, rest}:
+      attribute(p, rest, scope, target)
+
+def merge_mitigation(first: Mitigation, second: Mitigation) -> Mitigation:
+  match first second:
+    case Mitigation{Some{x}, a} Mitigation{next, b}:
+      Mitigation{Some{x}, E.completion_merge(a, b)}
+    case Mitigation{None{}, a} Mitigation{next, b}:
+      Mitigation{next, E.completion_merge(a, b)}
+
+
+def mitigation(fuel: Nat, ns: List<&2, T.Node>, +lines: List<&2, U32>) -> Mitigation:
+  match fuel ns:
+    case _ Nil{}:
+      Mitigation{None{}, E.Finished{}}
+    case 0n _:
+      Mitigation{None{}, E.Exhausted{}}
+    case 1n+(+p) Con{T.Leaf{L.Tok{0, "this", +line}}, Con{T.Leaf{L.Tok{5, "->", a}}, Con{T.Leaf{L.Tok{1, "authorize", b}}, Con{T.Grp{40, c, args}, rest}}}}:
+      L.sel(Mitigation, E.ignored(lines, line), u => mitigation(p, rest, lines), u => Mitigation{Some{line}, E.Finished{}})
+    case 1n+(+p) Con{T.Grp{kind, l, body}, rest}:
+      merge_mitigation(mitigation(p, body, lines), mitigation(p, rest, lines))
+    case 1n+(+p) Con{n, rest}:
+      mitigation(p, rest, lines)
+
+def method_body(fuel: Nat, ns: List<&2, T.Node>, lines: List<&2, U32>) -> Mitigation:
+  match fuel ns:
+    case _ Nil{}:
+      Mitigation{None{}, E.Finished{}}
+    case 0n _:
+      Mitigation{None{}, E.Exhausted{}}
+    case 1n+(+p) Con{T.Grp{123, l, body}, rest}:
+      mitigation(p, body, lines)
+    case 1n+(+p) Con{T.Leaf{L.Tok{5, ";", l}}, rest}:
+      Mitigation{None{}, E.Finished{}}
+    case 1n+(+p) Con{n, rest}:
+      method_body(p, rest, lines)
+
+def finish_method(result: Mitigation, path: String, line: U32, name: String, tail: List<&2, Method>, done: E.Completion) -> Methods:
+  match result:
+    case Mitigation{mitig, m}:
+      Methods{Con{Method{path, line, name, mitig}, tail}, E.completion_merge(done, m)}
+
+
+def method_found(result: Methods, fuel: Nat, rest: List<&2, T.Node>, path: String, lines: List<&2, U32>, line: U32, name: String, eligible: Bool) -> Methods:
+  match result:
+    case Methods{+tail, +done}:
+      L.sel(Methods, eligible, u => finish_method(method_body(fuel, rest, lines), path, line, name, tail, done), u => Methods{tail, done})
+
+
+def merge_methods(result: Methods, done: E.Completion) -> Methods:
+  match result:
+    case Methods{items, c}:
+      Methods{items, E.completion_merge(done, c)}
+
+
+def flag_value(flag: Flag) -> Bool:
+  match flag:
+    case Flag{value, done}:
+      value
+
+def flag_completion(flag: Flag) -> E.Completion:
+  match flag:
+    case Flag{value, done}:
+      done
+
+def methods(fuel: Nat, ns: List<&2, T.Node>, +scope: J.Scope, +path: String, +lines: List<&2, U32>, +auth: Bool, +json: Bool) -> Methods:
+  match fuel ns:
+    case _ Nil{}:
+      Methods{[], E.Finished{}}
+    case 0n _:
+      Methods{[], E.Exhausted{}}
+    case 1n+(+p) Con{T.Grp{35, +line, +attrs}, rest}:
       +visible = Bool.not(E.ignored(lines, line))
-      methods(rest, scope, path, lines, auth || (visible && attribute(attrs, scope, "livewire\\attributes\\authorize")), json || (visible && attribute(attrs, scope, "livewire\\attributes\\json")))
-    case Con{T.Leaf{L.Tok{1, "function", +line}}, Con{T.Leaf{L.Tok{1, name, n}}, Con{T.Grp{40, a, args}, +rest}}}:
-      +tail = methods(rest, scope, path, lines, False{}, False{})
-      L.sel(List<&2, Method>, auth && json && Bool.not(E.ignored(lines, line)), u => Con{Method{path, line, name, method_body(rest, lines)}, tail}, u => tail)
-    case Con{T.Leaf{L.Tok{5, ";", l}}, rest}:
-      methods(rest, scope, path, lines, False{}, False{})
-    case Con{T.Grp{123, l, body}, rest}:
-      methods(rest, scope, path, lines, False{}, False{})
-    case Con{n, rest}:
-      methods(rest, scope, path, lines, auth, json)
+      +a = attribute(p, attrs, scope, "livewire\\attributes\\authorize")
+      +b = attribute(p, attrs, scope, "livewire\\attributes\\json")
+      merge_methods(methods(p, rest, scope, path, lines, auth || (visible && flag_value(a)), json || (visible && flag_value(b))), E.completion_merge(flag_completion(a), flag_completion(b)))
+    case 1n+(+p) Con{T.Leaf{L.Tok{1, "function", +line}}, Con{T.Leaf{L.Tok{1, name, n}}, Con{T.Grp{40, a, args}, +rest}}}:
+      method_found(methods(p, rest, scope, path, lines, False{}, False{}), p, rest, path, lines, line, name, auth && json && Bool.not(E.ignored(lines, line)))
+    case 1n+(+p) Con{T.Leaf{L.Tok{5, ";", l}}, rest}:
+      methods(p, rest, scope, path, lines, False{}, False{})
+    case 1n+(+p) Con{T.Grp{123, l, body}, rest}:
+      methods(p, rest, scope, path, lines, False{}, False{})
+    case 1n+(+p) Con{n, rest}:
+      methods(p, rest, scope, path, lines, auth, json)
 
 def add_component(result: Collected, component: Component) -> Collected:
   match result:
     case Collected{cs, done}:
       Collected{Con{component, cs}, done}
 
-def classes(fuel: Nat, ns: List<&2, T.Node>, +scope: J.Scope, +path: String, +lines: List<&2, U32>) -> Collected:
+type ClassTail is Data:
+  ClassTail{nodes: List<&2, T.Node>, completion: E.Completion}
+
+def class_tail(fuel: Nat, ns: List<&2, T.Node>) -> ClassTail:
+  match fuel ns:
+    case _ Nil{}:
+      ClassTail{[], E.Finished{}}
+    case 0n _:
+      ClassTail{[], E.Exhausted{}}
+    case 1n+(+p) Con{T.Grp{123, l, body}, rest}:
+      ClassTail{ns, E.Finished{}}
+    case 1n+(+p) Con{T.Leaf{L.Tok{5, ";", l}}, rest}:
+      ClassTail{rest, E.Finished{}}
+    case 1n+(+p) Con{node, rest}:
+      class_tail(p, rest)
+
+def tail_rest(tail: ClassTail) -> List<&2, T.Node>:
+  match tail:
+    case ClassTail{Con{T.Grp{123, l, body}, rest}, done}:
+      rest
+    case ClassTail{nodes, done}:
+      nodes
+
+def tail_methods(tail: ClassTail, allowance: Nat, scope: J.Scope, path: String, lines: List<&2, U32>, eligible: Bool) -> Methods:
+  match tail:
+    case ClassTail{Con{T.Grp{123, l, body}, rest}, done}:
+      merge_methods(L.sel(Methods, eligible, u => methods(allowance, body, scope, path, lines, False{}, False{}), u => Methods{[], E.Finished{}}), done)
+    case ClassTail{nodes, done}:
+      Methods{[], done}
+
+def finish_class(result: Methods, collected: Collected, identity: String) -> Collected:
+  match result collected:
+    case Methods{ms, a} Collected{cs, b}:
+      Collected{Con{Component{identity, ms}, cs}, E.completion_merge(a, b)}
+
+def classes(fuel: Nat, +allowance: Nat, ns: List<&2, T.Node>, +scope: J.Scope, +path: String, +lines: List<&2, U32>) -> Collected:
   match fuel ns scope:
     case _ Nil{} _:
       Collected{[], E.Finished{}}
@@ -73,21 +170,20 @@ def classes(fuel: Nat, ns: List<&2, T.Node>, +scope: J.Scope, +path: String, +li
       Collected{[], E.Exhausted{}}
     case _ _ J.Invalid{}:
       Collected{[], E.Finished{}}
-    case 1n+p Con{T.Leaf{L.Tok{1, "class", +line}}, Con{T.Leaf{L.Tok{1, +name, n}}, Con{T.Leaf{L.Tok{1, "extends", e}}, Con{T.Leaf{L.Tok{1, base, b}}, Con{T.Grp{123, c, body}, rest}}}}} J.Scope{+namespace, +im}:
-      +ms = L.sel(List<&2, Method>, String.eq(J.resolve(base, J.Scope{namespace, im}), "livewire\\component") && Bool.not(E.ignored(lines, line)),
-        u => methods(body, J.Scope{namespace, im}, path, lines, False{}, False{}), u => [])
-      add_component(classes(p, rest, J.Scope{namespace, im}, path, lines), Component{J.join(namespace, name), ms})
-    case 1n+p Con{T.Leaf{L.Tok{1, "class", l}}, Con{T.Leaf{L.Tok{1, name, n}}, Con{T.Grp{123, c, body}, rest}}} J.Scope{+namespace, im}:
-      add_component(classes(p, rest, J.Scope{namespace, im}, path, lines), Component{J.join(namespace, name), []})
-    case 1n+p Con{node, rest} _:
-      classes(p, rest, scope, path, lines)
+    case 1n+(+p) Con{T.Leaf{L.Tok{1, "class", +line}}, Con{T.Leaf{L.Tok{1, +name, n}}, Con{T.Leaf{L.Tok{1, "extends", e}}, Con{T.Leaf{L.Tok{1, base, b}}, rest}}}} J.Scope{+namespace, +im}:
+      +tail = class_tail(p, rest)
+      finish_class(tail_methods(tail, allowance, J.Scope{namespace, im}, path, lines, String.eq(J.resolve(base, J.Scope{namespace, im}), "livewire\\component") && Bool.not(E.ignored(lines, line))), classes(p, allowance, tail_rest(tail), J.Scope{namespace, im}, path, lines), J.join(namespace, name))
+    case 1n+(+p) Con{T.Leaf{L.Tok{1, "class", l}}, Con{T.Leaf{L.Tok{1, name, n}}, Con{T.Grp{123, c, body}, rest}}} J.Scope{+namespace, im}:
+      add_component(classes(p, allowance, rest, J.Scope{namespace, im}, path, lines), Component{J.join(namespace, name), []})
+    case 1n+(+p) Con{node, rest} _:
+      classes(p, allowance, rest, scope, path, lines)
 
 def file_input(input: Maybe<&2, P.Input>, path: String) -> Collected:
   match input:
     case None{}:
       Collected{[], E.Finished{}}
-    case Some{P.Input{+nodes, tokens, lines, allowance}}:
-      classes(allowance, nodes, J.file_scope(nodes), path, lines)
+    case Some{P.Input{+nodes, tokens, lines, +allowance}}:
+      classes(allowance, allowance, nodes, J.file_scope(nodes), path, lines)
 
 def file(source: E.Src) -> Collected:
   match source:
@@ -164,22 +260,22 @@ def routes(fuel: Nat, ns: List<&2, T.Node>, +scope: J.Scope, +components: List<&
       E.Incomplete{[]}
     case _ _ J.Invalid{} _:
       E.Complete{[]}
-    case 1n+p Con{T.Leaf{L.Tok{1, facade, +line}}, Con{T.Leaf{L.Tok{5, "::", c}}, Con{T.Leaf{L.Tok{1, "get", g}}, Con{T.Grp{40, a, args}, Con{T.Leaf{L.Tok{5, ";", e}}, rest}}}}} _ True{}:
+    case 1n+(+p) Con{T.Leaf{L.Tok{1, facade, +line}}, Con{T.Leaf{L.Tok{5, "::", c}}, Con{T.Leaf{L.Tok{1, "get", g}}, Con{T.Grp{40, a, args}, Con{T.Leaf{L.Tok{5, ";", e}}, rest}}}}} _ True{}:
       +tail = routes(p, rest, scope, components, path, lines, True{})
       L.sel(E.Evidence, String.eq(J.resolve(facade, scope), "illuminate\\support\\facades\\route") && Bool.not(E.ignored(lines, line)) && route_args(args, scope, components),
         u => E.merge(E.Complete{[E.Observation{path, line, E.LivewireRoute{}, E.Possible{}, "component route; runtime registration and exposure unknown"}]}, tail), u => tail)
-    case 1n+p Con{T.Leaf{L.Tok{5, ";", l}}, rest} _ _:
+    case 1n+(+p) Con{T.Leaf{L.Tok{5, ";", l}}, rest} _ _:
       routes(p, rest, scope, components, path, lines, True{})
-    case 1n+p Con{T.Grp{123, l, body}, rest} _ _:
+    case 1n+(+p) Con{T.Grp{123, l, body}, rest} _ _:
       routes(p, rest, scope, components, path, lines, True{})
-    case 1n+p Con{node, rest} _ _:
+    case 1n+(+p) Con{node, rest} _ _:
       routes(p, rest, scope, components, path, lines, False{})
 
 def route_input(input: Maybe<&2, P.Input>, path: String, components: List<&2, Component>) -> E.Evidence:
   match input:
     case None{}:
       E.Complete{[]}
-    case Some{P.Input{+nodes, tokens, lines, allowance}}:
+    case Some{P.Input{+nodes, tokens, lines, +allowance}}:
       routes(allowance, nodes, J.file_scope(nodes), components, path, lines, True{})
 
 def route_files(xs: List<&2, E.Src>, +components: List<&2, Component>) -> E.Evidence:

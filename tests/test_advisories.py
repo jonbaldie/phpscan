@@ -88,6 +88,30 @@ Route::get('/comments', CommentEditor::class);
                     self.assertEqual([(x['kind'], x['line'], x['status']) for x in finding['properties']['sourceEvidence']],
                                      [('livewire-method', 9, 'possible'), ('livewire-mitigation', 9, 'mitigation'), ('livewire-route', 4, 'possible')])
 
+    def test_livewire_component_implements_and_nested_authorize(self):
+        self.inventory('4.4.7')
+        component = self.root / 'component.php'
+        component.write_text(r'''<?php
+use Livewire\Component;
+use Livewire\Attributes\Authorize;
+use Livewire\Attributes\Json;
+class Example extends Component implements SomeInterface {
+    #[Authorize('delete'), Json] public function update() {
+        if ($allowed) { $this->authorize('delete'); }
+    }
+}
+''')
+        route = self.root / 'routes.php'
+        route.write_text(r'''<?php
+use Illuminate\Support\Facades\Route;
+Route::get('/example', Example::class);
+''')
+        result = self.scan()
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn(f'livewire-method possible at {component}:6', result.stdout)
+        self.assertIn(f'livewire-mitigation mitigation at {component}:7', result.stdout)
+        self.assertIn(f'livewire-route possible at {route}:3', result.stdout)
+
     def test_livewire_attributes_on_different_methods_are_unknown(self):
         self.inventory('4.4.7')
         (self.root / 'component.php').write_text('''<?php
